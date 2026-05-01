@@ -1,0 +1,23 @@
+[package]
+name = "usb-can-a-rs"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "sync", "time", "io-util", "macros"] }
+tokio-serial = "5.4"
+bytes = "1.5"
+thiserror = "1.0"
+tracing = "0.1"
+rand = "0.8"
+
+# Use zencan-common for CAN types (without socketcan feature for cross-platform)
+zencan-common = { version = "0.0.3", default-features = false, features = ["std", "log"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "signal"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lib]
+name = "usb_can_a"
+path = "src/lib.rs"

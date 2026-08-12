@@ -1,11 +1,42 @@
-// ============================================
-// zencan 适配层：为 BusManager 提供兼容接口
-// ============================================
+//! zencan adaptor: provides `BusManager`-compatible sender/receiver.
+//!
+//! Converts between this crate's `embedded-can` based [`CanMessage`] and
+//! `zencan-common`'s message types, and implements zencan's
+//! `AsyncCanSender` / `AsyncCanReceiver` traits.
 
 use tokio::sync::mpsc;
-use zencan_common::{CanId, CanMessage, traits::{AsyncCanReceiver, AsyncCanSender, CanSendError}};
+use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender, CanSendError};
+use zencan_common::{CanId, CanMessage as ZenCanMessage};
 
-use crate::{CanUsbConfig, ClientError, Frame, client_with_split::CanUsbSender, split};
+use crate::message::CanMessage;
+use crate::tokio_serial::{split, CanUsbSender, ClientError, TokioSerialConfig};
+use embedded_can::{ExtendedId, Id, StandardId};
+
+/// Convert a zencan message into our `embedded-can` based message.
+fn from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
+    let id = match msg.id {
+        CanId::Std(raw) => Id::Standard(StandardId::new(raw)?),
+        CanId::Extended(raw) => Id::Extended(ExtendedId::new(raw)?),
+    };
+    if msg.rtr {
+        CanMessage::new_rtr(id, msg.dlc)
+    } else {
+        CanMessage::new(id, msg.data())
+    }
+}
+
+/// Convert our message into a zencan message.
+fn to_zencan(msg: &CanMessage) -> ZenCanMessage {
+    let id = match msg.id() {
+        Id::Standard(std) => CanId::Std(std.as_raw()),
+        Id::Extended(ext) => CanId::Extended(ext.as_raw()),
+    };
+    if msg.is_rtr() {
+        ZenCanMessage::new_rtr(id)
+    } else {
+        ZenCanMessage::new(id, msg.data())
+    }
+}
 
 /// 适配 zencan 的 AsyncCanSender
 pub struct ZenCanSender {
@@ -18,16 +49,15 @@ impl ZenCanSender {
     }
 }
 
-
 /// 发送错误适配
 #[derive(Debug)]
 pub struct ZenCanSendError {
     msg: String,
-    undelivered: Option<CanMessage>,
+    undelivered: Option<ZenCanMessage>,
 }
 
 impl ZenCanSendError {
-    pub fn new(msg: String, undelivered: Option<CanMessage>) -> Self {
+    pub fn new(msg: String, undelivered: Option<ZenCanMessage>) -> Self {
         Self { msg, undelivered }
     }
 }
@@ -39,10 +69,10 @@ impl core::fmt::Display for ZenCanSendError {
 }
 
 impl CanSendError for ZenCanSendError {
-    fn into_can_message(self) -> CanMessage {
+    fn into_can_message(self) -> ZenCanMessage {
         self.undelivered.unwrap_or_else(|| {
             // 如果没有保存消息，创建一个空的作为占位
-            CanMessage::new(CanId::Std(0), &[])
+            ZenCanMessage::new(CanId::Std(0), &[])
         })
     }
 
@@ -59,14 +89,14 @@ impl From<ClientError> for ZenCanSendError {
     }
 }
 
-// 修改 ZenCanSender 的 send 实现以支持错误时返回消息
 impl AsyncCanSender for ZenCanSender {
     type Error = ZenCanSendError;
 
-    async fn send(&mut self, msg: CanMessage) -> Result<(), Self::Error> {
-        let frame = Frame::from_message(msg);
-        
-        self.inner.send(frame).await.map_err(|e| {
+    async fn send(&mut self, msg: ZenCanMessage) -> Result<(), Self::Error> {
+        let converted = from_zencan(&msg)
+            .ok_or_else(|| ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg.clone())))?;
+
+        self.inner.send(converted.into()).await.map_err(|e| {
             // 发送失败，返回错误并附带原始消息
             ZenCanSendError::new(e.to_string(), Some(msg))
         })
@@ -96,12 +126,12 @@ impl core::fmt::Display for ZenCanRecvError {
 impl AsyncCanReceiver for ZenCanReceiver {
     type Error = ZenCanRecvError;
 
-    fn try_recv(&mut self) -> Option<CanMessage> {
-        self.inner.try_recv().ok()
+    fn try_recv(&mut self) -> Option<ZenCanMessage> {
+        self.inner.try_recv().ok().map(|m| to_zencan(&m))
     }
 
-    async fn recv(&mut self) -> Result<CanMessage, Self::Error> {
-        self.inner.recv().await.ok_or_else(|| {
+    async fn recv(&mut self) -> Result<ZenCanMessage, Self::Error> {
+        self.inner.recv().await.map(|m| to_zencan(&m)).ok_or_else(|| {
             ZenCanRecvError("Channel closed".to_string())
         })
     }
@@ -112,10 +142,10 @@ impl AsyncCanReceiver for ZenCanReceiver {
 }
 
 /// 专为 zencan BusManager 创建的 split 函数
-/// 
+///
 /// 返回可以直接传给 BusManager::new 的 sender 和 receiver
 pub async fn split_for_zencan(
-    config: CanUsbConfig,
+    config: TokioSerialConfig,
 ) -> Result<(ZenCanSender, ZenCanReceiver), ClientError> {
     let (tx, rx) = split(config).await?;
     Ok((ZenCanSender::new(tx), ZenCanReceiver::new(rx)))

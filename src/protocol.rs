@@ -1,7 +1,11 @@
 //! USB-CAN protocol implementation
 
+#[allow(unused_imports)]
+use crate::logging::{debug, Hex};
+use crate::message::id_from_raw;
 use crate::types::CanFrameType;
-use tracing::debug;
+use alloc::string::String;
+use alloc::vec::Vec;
 
 /// USB-CAN command frame size
 pub const CMD_FRAME_SIZE: usize = 20;
@@ -64,28 +68,31 @@ pub fn build_settings_frame(
     frame
 }
 
-/// Build a data frame for transmission
-/// 
+/// Max wire size of a data frame: header(2) + id(2) + data(8) + footer(1)
+pub const DATA_FRAME_MAX_SIZE: usize = 13;
+
+/// Build a data frame for transmission into a caller-provided buffer (no-alloc).
+///
 /// Frame format:
 /// - Byte 0: 0xAA (start)
 /// - Byte 1: 0xC0 | (is_extended << 5) | dlc
 /// - Byte 2-3: ID (little endian)
 /// - Byte 4..4+dlc: Data
 /// - Byte 4+dlc: 0x55 (footer)
-pub fn build_data_frame(
+///
+/// Returns the number of bytes written to `out`.
+pub fn build_data_frame_into(
     frame_type: CanFrameType,
-    id: impl Into<u32>,
+    id: u32,
     data: &[u8],
-) -> Result<Vec<u8>, &'static str> {
+    out: &mut [u8; DATA_FRAME_MAX_SIZE],
+) -> Result<usize, &'static str> {
     if data.len() > 8 {
         return Err("Data too long (max 8 bytes)");
     }
 
-    let id = id.into();
-    let mut buffer = Vec::with_capacity(5 + data.len());
-
     // Start byte
-    buffer.push(FRAME_START);
+    out[0] = FRAME_START;
 
     // Info byte: 0xC0 | extended_flag | dlc
     let mut info: u8 = 0xC0;
@@ -93,19 +100,32 @@ pub fn build_data_frame(
         info |= 0x20;
     }
     info |= data.len() as u8;
-    buffer.push(info);
+    out[1] = info;
 
     // ID (little endian)
-    buffer.push((id & 0xFF) as u8);
-    buffer.push(((id >> 8) & 0xFF) as u8);
+    out[2] = (id & 0xFF) as u8;
+    out[3] = ((id >> 8) & 0xFF) as u8;
 
     // Data
-    buffer.extend_from_slice(data);
+    out[4..4 + data.len()].copy_from_slice(data);
 
     // Footer
-    buffer.push(FRAME_FOOTER);
+    out[4 + data.len()] = FRAME_FOOTER;
 
-    Ok(buffer)
+    Ok(5 + data.len())
+}
+
+/// Build a data frame for transmission
+///
+/// Allocating variant of [`build_data_frame_into`].
+pub fn build_data_frame(
+    frame_type: CanFrameType,
+    id: impl Into<u32>,
+    data: &[u8],
+) -> Result<Vec<u8>, &'static str> {
+    let mut out = [0u8; DATA_FRAME_MAX_SIZE];
+    let len = build_data_frame_into(frame_type, id.into(), data, &mut out)?;
+    Ok(out[..len].to_vec())
 }
 
 /// Generate checksum for command frames
@@ -130,14 +150,34 @@ pub struct ParsedFrame {
     pub is_extended: bool,
 }
 
-/// Parse incoming buffer and extract complete frames
-/// 
-/// Returns the number of bytes consumed from the buffer
-pub fn parse_frames(
+/// Metadata of a single parsed frame (no-alloc variant).
+///
+/// Frame data is copied into the caller-provided buffer by [`parse_next_frame`].
+#[derive(Debug, Clone, Copy)]
+pub struct ParsedFrameMeta {
+    /// Frame ID (11-bit or 29-bit)
+    pub id: u16,
+    /// Data Length Code (0-8)
+    pub dlc: u8,
+    /// True if extended frame (29-bit ID)
+    pub is_extended: bool,
+}
+
+/// Scan `buffer` for the next complete frame, skipping junk bytes.
+///
+/// Returns `(consumed, frame)`:
+/// - `consumed` is the number of bytes that can be dropped from the front of
+///   the buffer (junk bytes, plus the frame itself if one was found). When an
+///   incomplete frame is found at `offset`, only the junk before it is reported
+///   as consumed so the partial frame stays in the buffer.
+/// - `frame` is `Some(meta)` when a complete frame was parsed; its data
+///   (0-8 bytes) is copied into `data_out`. Frames with DLC > 8 are treated
+///   as junk.
+pub fn parse_next_frame(
     buffer: &[u8],
-    output: &mut Vec<ParsedFrame>,
+    data_out: &mut [u8; 8],
     debug_traffic: bool,
-) -> usize {
+) -> (usize, Option<ParsedFrameMeta>) {
     let mut offset = 0;
 
     while buffer.len() - offset >= 6 {
@@ -157,6 +197,11 @@ pub fn parse_frames(
         }
 
         let dlc = (info & 0x0F) as usize;
+        if dlc > 8 {
+            // Not a valid classic-CAN frame; treat start byte as junk
+            offset += 1;
+            continue;
+        }
         let frame_len = dlc + 5; // header(2) + id(2) + data(dlc) + footer(1)
 
         // Check if we have the complete frame
@@ -175,28 +220,57 @@ pub fn parse_frames(
 
         // Extract data
         let data_start = offset + 4;
-        let data: Vec<u8> = buffer[data_start..data_start + dlc].to_vec();
+        data_out[..dlc].copy_from_slice(&buffer[data_start..data_start + dlc]);
 
         // Determine frame type
-        let is_extended = (buffer[offset + 1] & 0x20) != 0;
+        let is_extended = (info & 0x20) != 0;
 
         if debug_traffic {
             debug!(
-                "Parsed frame: id=0x{:03x}, extended={}, dlc={}, data={:02x?}",
-                id, is_extended, dlc, data
+                "Parsed frame: id=0x{:03x}, extended={}, dlc={}, data={:?}",
+                id, is_extended, dlc, Hex(&data_out[..dlc])
             );
         }
 
-        output.push(ParsedFrame {
-            id,
-            data,
-            is_extended,
-        });
-
-        offset += frame_len;
+        return (
+            offset + frame_len,
+            Some(ParsedFrameMeta {
+                id,
+                dlc: dlc as u8,
+                is_extended,
+            }),
+        );
     }
 
-    offset
+    (offset, None)
+}
+
+/// Parse incoming buffer and extract complete frames
+///
+/// Returns the number of bytes consumed from the buffer
+pub fn parse_frames(
+    buffer: &[u8],
+    output: &mut Vec<ParsedFrame>,
+    debug_traffic: bool,
+) -> usize {
+    let mut total_consumed = 0;
+    let mut data_out = [0u8; 8];
+
+    loop {
+        let (consumed, frame) = parse_next_frame(&buffer[total_consumed..], &mut data_out, debug_traffic);
+        total_consumed += consumed;
+
+        match frame {
+            Some(meta) => output.push(ParsedFrame {
+                id: meta.id,
+                data: data_out[..meta.dlc as usize].to_vec(),
+                is_extended: meta.is_extended,
+            }),
+            None => break,
+        }
+    }
+
+    total_consumed
 }
 
 /// Convert hex string to binary data
@@ -222,17 +296,11 @@ pub fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
 /// Parse a CAN ID from hex string
 ///
 /// Supports 1-8 character hex strings for both standard (11-bit) and extended (29-bit) IDs
-pub fn parse_can_id(hex_id: &str) -> Option<crate::CanId> {
+pub fn parse_can_id(hex_id: &str) -> Option<embedded_can::Id> {
     let hex: String = hex_id.chars().filter(|c| c.is_ascii_hexdigit()).collect();
 
     // Standard IDs are 11-bit (max 0x7FF), Extended IDs are 29-bit
     let id = u32::from_str_radix(&hex, 16).ok()?;
 
-    if id <= 0x7FF {
-        Some(crate::CanId::Std(id as u16))
-    } else if id <= 0x1FFFFFFF {
-        Some(crate::CanId::Extended(id))
-    } else {
-        None // ID too large for 29-bit extended
-    }
+    id_from_raw(id)
 }

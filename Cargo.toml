@@ -1,22 +1,51 @@
 [package]
 name = "usb-can-a-rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1", features = ["rt", "sync", "time", "io-util", "macros"] }
-tokio-serial = "5.4"
-bytes = "1.5"
-thiserror = "1.0"
-tracing = "0.1"
-rand = "0.8"
+# Core CAN types (no_std compatible)
+embedded-can = "0.4"
 
-# Use zencan-common for CAN types (without socketcan feature for cross-platform)
-zencan-common = { version = "0.0.3", default-features = false, features = ["std", "log"] }
+# Logging backends (pick one; `defmt` takes precedence if both are enabled)
+log = { version = "0.4", optional = true }
+defmt = { version = "0.3", optional = true }
+
+# std adapter: tokio-serial transport
+tokio = { version = "1", features = ["rt", "sync", "time", "io-util", "macros"], optional = true }
+tokio-serial = { version = "5.4", optional = true }
+
+# no_std adapter: embedded-io transport (sync + async)
+embedded-io = { version = "0.6", optional = true }
+embedded-io-async = { version = "0.6", optional = true }
+
+# Extension adapter: zencan BusManager integration
+zencan-common = { version = "0.0.3", default-features = false, features = ["std"], optional = true }
+
+[features]
+default = ["std"]
+std = []
+# Logging: choose at most one of `log` / `defmt`
+log = ["dep:log", "zencan-common?/log"]
+defmt = ["dep:defmt", "zencan-common?/defmt"]
+# std adapter over tokio-serial
+tokio-serial = ["std", "dep:tokio", "dep:tokio-serial"]
+# no_std adapter over embedded-io (sync and async)
+embedded-io = ["dep:embedded-io", "dep:embedded-io-async"]
+# zencan adaptor (requires the tokio-serial transport)
+zencan = ["tokio-serial", "dep:zencan-common"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "signal"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+env_logger = "0.11"
+
+[[example]]
+name = "client"
+required-features = ["tokio-serial", "log"]
+
+[[example]]
+name = "split"
+required-features = ["tokio-serial", "log"]
 
 [lib]
 name = "usb_can_a"

@@ -1,8 +1,10 @@
 //! Type definitions for USB-CAN adapter
 //!
-//! Uses zencan-common for CAN message types, adds USB-CAN specific types.
+//! CAN message types come from [`embedded_can`] (see [`crate::message`]);
+//! this module adds USB-CAN adapter specific types.
 
-pub use zencan_common::{CanId, CanMessage};
+// Re-export embedded-can ID types for convenience
+pub use embedded_can::{ExtendedId, Id, StandardId};
 
 /// CAN bus speed options
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,9 +37,17 @@ pub enum CanSpeed {
 }
 
 /// Error when parsing CAN speed
-#[derive(Debug, thiserror::Error)]
-#[error("Invalid CAN speed: {0}")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidCanSpeed(pub u32);
+
+impl core::fmt::Display for InvalidCanSpeed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Invalid CAN speed: {}", self.0)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InvalidCanSpeed {}
 
 impl TryFrom<u32> for CanSpeed {
     type Error = InvalidCanSpeed;
@@ -117,13 +127,12 @@ pub enum PayloadMode {
     Fixed,
 }
 
-/// Configuration for the CAN USB client
+/// CAN-side configuration for the USB-CAN adapter.
+///
+/// Transport-specific settings (serial device, baudrate, ...) live in the
+/// respective adapter crates/modules (e.g. [`crate::tokio_serial`]).
 #[derive(Debug, Clone)]
 pub struct CanUsbConfig {
-    /// Serial device path (e.g., "/dev/ttyUSB0")
-    pub device: String,
-    /// Serial baudrate (default: 2000000)
-    pub baudrate: u32,
     /// CAN bus speed
     pub can_speed: CanSpeed,
     /// CAN operation mode
@@ -141,8 +150,6 @@ pub struct CanUsbConfig {
 impl Default for CanUsbConfig {
     fn default() -> Self {
         Self {
-            device: "/dev/ttyUSB0".to_string(),
-            baudrate: 2000000,
             can_speed: CanSpeed::Bps500000,
             can_mode: CanMode::Normal,
             frame_type: CanFrameType::Standard,
@@ -150,54 +157,5 @@ impl Default for CanUsbConfig {
             mask_id: 0,
             debug_traffic: false,
         }
-    }
-}
-
-/// Extension methods for CanId
-pub trait CanIdExt {
-    /// Get LSB byte for USB-CAN protocol
-    fn lsb(&self) -> u8;
-    /// Get MSB byte for USB-CAN protocol
-    fn msb(&self) -> u8;
-    /// Create from LSB and MSB bytes
-    fn from_bytes(lsb: u8, msb: u8) -> Self;
-}
-
-impl CanIdExt for CanId {
-    fn lsb(&self) -> u8 {
-        match self {
-            CanId::Extended(id) => (*id & 0xFF) as u8,
-            CanId::Std(id) => (*id & 0xFF) as u8,
-        }
-    }
-
-    fn msb(&self) -> u8 {
-        match self {
-            CanId::Extended(id) => ((*id >> 8) & 0xFF) as u8,
-            CanId::Std(id) => ((*id >> 8) & 0xFF) as u8,
-        }
-    }
-
-    fn from_bytes(lsb: u8, msb: u8) -> Self {
-        let id = u16::from_le_bytes([lsb, msb]);
-        CanId::Std(id)
-    }
-}
-
-/// Extension methods for CanMessage
-pub trait CanMessageExt {
-    /// Create a new data frame
-    fn new_data(id: CanId, data: &[u8]) -> Self;
-    /// Get the DLC (Data Length Code)
-    fn dlc(&self) -> u8;
-}
-
-impl CanMessageExt for CanMessage {
-    fn new_data(id: CanId, data: &[u8]) -> Self {
-        CanMessage::new(id, data)
-    }
-
-    fn dlc(&self) -> u8 {
-        self.dlc
     }
 }

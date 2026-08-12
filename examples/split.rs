@@ -1,25 +1,20 @@
-use tracing_subscriber::EnvFilter;
-use usb_can_a::{CanUsbConfig, Frame, CanId, CanSpeed, split};
+use usb_can_a::tokio_serial::{split, TokioSerialConfig};
+use usb_can_a::{CanFrameType, CanSpeed, CanUsbConfig, Frame, StandardId};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	tracing_subscriber::fmt()
-		.with_env_filter(
-			EnvFilter::try_from_default_env()
-				.unwrap_or_else(|_| EnvFilter::new("debug")),
-		)
-		.init();
+	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
-	let device = "COM4".to_string();
-
-	let config = CanUsbConfig {
-		device,
+	let config = TokioSerialConfig {
+		device: "COM4".to_string(),
 		baudrate: 2_000_000,
-		can_speed: CanSpeed::Bps1000000,
-		frame_type: usb_can_a::CanFrameType::Standard,
-		// filter_id: 0x100,
-		// mask_id: 0x7F0,
-		..Default::default()
+		can: CanUsbConfig {
+			can_speed: CanSpeed::Bps1000000,
+			frame_type: CanFrameType::Standard,
+			// filter_id: 0x100,
+			// mask_id: 0x7F0,
+			..Default::default()
+		},
 	};
 
 	// 返回 (sender, receiver) - 和 mpsc::channel 一样的风格！
@@ -30,13 +25,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// 生产者任务 1
 	tokio::spawn(async move {
-		let frame = Frame::standard(CanId::Std(0x123), &[0x11]);
+		let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11]);
 		tx.send(frame).await.unwrap();
 	});
 
 	// 生产者任务 2
 	tokio::spawn(async move {
-		let frame = Frame::standard(CanId::Std(0x456), &[0x22]);
+		let frame = Frame::standard(StandardId::new(0x456).unwrap(), &[0x22]);
 		tx2.send(frame).await.unwrap();
 	});
 

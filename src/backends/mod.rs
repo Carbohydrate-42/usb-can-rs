@@ -6,6 +6,3 @@
 
 #[cfg(feature = "tokio-serial")]
 pub mod tokio_serial;
-
-#[cfg(feature = "embedded-io")]
-pub mod embedded_io;

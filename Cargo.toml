@@ -15,10 +15,6 @@ defmt = { version = "0.3", optional = true }
 tokio = { version = "1", features = ["rt", "sync", "time", "io-util", "macros"], optional = true }
 tokio-serial = { version = "5.4", optional = true }
 
-# no_std adapter: embedded-io transport (sync + async)
-embedded-io = { version = "0.6", optional = true }
-embedded-io-async = { version = "0.6", optional = true }
-
 # Extension adapter: zencan BusManager integration
 zencan-common = { version = "0.0.3", default-features = false, features = ["std"], optional = true }
 
@@ -30,8 +26,6 @@ log = ["dep:log", "zencan-common?/log"]
 defmt = ["dep:defmt", "zencan-common?/defmt"]
 # std adapter over tokio-serial
 tokio-serial = ["std", "dep:tokio", "dep:tokio-serial"]
-# no_std adapter over embedded-io (sync and async)
-embedded-io = ["dep:embedded-io", "dep:embedded-io-async"]
 # zencan adaptor (requires the tokio-serial transport)
 zencan = ["tokio-serial", "dep:zencan-common"]
 
@@ -50,14 +44,6 @@ required-features = ["tokio-serial", "log"]
 [[example]]
 name = "zencan"
 required-features = ["zencan", "log"]
-
-[[example]]
-name = "embedded_io_loopback"
-required-features = ["embedded-io", "log"]
-
-[[test]]
-name = "embedded_io_tests"
-required-features = ["embedded-io"]
 
 [[test]]
 name = "zencan_tests"

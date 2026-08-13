@@ -1,8 +1,6 @@
 pub mod wareshare_usb_can_a;
 
-use crate::message::id_from_raw;
 use crate::types::CanFrameType;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 /// A parsed CAN frame from the wire
@@ -111,36 +109,4 @@ pub trait Protocol {
 
         total_consumed
     }
-}
-
-/// Convert hex string to binary data
-///
-/// # Arguments
-/// * `hex` - Hex string (e.g., "DEADBEEF", spaces allowed)
-///
-/// # Returns
-/// Vector of bytes
-pub fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
-    let hex: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-
-    if hex.len() % 2 != 0 {
-        return None;
-    }
-
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
-        .collect()
-}
-
-/// Parse a CAN ID from hex string
-///
-/// Supports 1-8 character hex strings for both standard (11-bit) and extended (29-bit) IDs
-pub fn parse_can_id(hex_id: &str) -> Option<embedded_can::Id> {
-    let hex: String = hex_id.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-
-    // Standard IDs are 11-bit (max 0x7FF), Extended IDs are 29-bit
-    let id = u32::from_str_radix(&hex, 16).ok()?;
-
-    id_from_raw(id)
 }

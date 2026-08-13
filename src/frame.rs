@@ -1,7 +1,6 @@
 //! CAN Frame types with multiple constructors
 
 use crate::message::{id_from_raw, CanMessage};
-use crate::protocol::hex_to_bytes;
 use crate::types::CanFrameType;
 use embedded_can::{ExtendedId, Id, StandardId};
 
@@ -54,6 +53,26 @@ impl Frame {
         }
     }
 
+    /// Convert hex string to binary data
+    ///
+    /// # Arguments
+    /// * `hex` - Hex string (e.g., "DEADBEEF", spaces allowed)
+    ///
+    /// # Returns
+    /// Vector of bytes
+    pub fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
+        let hex: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
+
+        if hex.len() % 2 != 0 {
+            return None;
+        }
+
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+            .collect()
+    }
+
     /// Create a frame from raw ID value and data
     ///
     /// ID is automatically determined as Standard (<= 0x7FF) or Extended
@@ -81,7 +100,7 @@ impl Frame {
     pub fn from_hex(hex_id: &str, hex_data: &str) -> Option<Self> {
         let hex: alloc::string::String = hex_id.chars().filter(|c| c.is_ascii_hexdigit()).collect();
         let id = u32::from_str_radix(&hex, 16).ok()?;
-        let data = hex_to_bytes(hex_data)?;
+        let data = Self::hex_to_bytes(hex_data)?;
         Some(Self::with_id(id, &data))
     }
 

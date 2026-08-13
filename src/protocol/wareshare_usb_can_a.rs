@@ -3,8 +3,8 @@
 #[allow(unused_imports)]
 use crate::logging::{debug, Hex};
 use crate::protocol::{ParsedFrameMeta, Protocol};
-use alloc::vec::Vec;
 use crate::types::CanFrameType;
+use alloc::vec::Vec;
 
 /// USB-CAN command frame size
 pub const CMD_FRAME_SIZE: usize = 20;
@@ -292,8 +292,7 @@ impl WaveshareUsbCanA {
     ///   as junk.
     pub fn parse_next_frame(
         buffer: &[u8],
-        data_out: &mut [u8; 8],
-        debug_traffic: bool,
+        data_out: &mut [u8; 8]
     ) -> (usize, Option<ParsedFrameMeta>) {
         let mut offset = 0;
 
@@ -342,15 +341,13 @@ impl WaveshareUsbCanA {
             // Determine frame type
             let is_extended = (info & 0x20) != 0;
 
-            if debug_traffic {
-                debug!(
-                    "Parsed frame: id=0x{:03x}, extended={}, dlc={}, data={:?}",
-                    id,
-                    is_extended,
-                    dlc,
-                    Hex(&data_out[..dlc])
-                );
-            }
+            debug!(
+                "Parsed frame: id=0x{:03x}, extended={}, dlc={}, data={:?}",
+                id,
+                is_extended,
+                dlc,
+                Hex(&data_out[..dlc])
+            );
 
             return (
                 offset + frame_len,
@@ -410,8 +407,7 @@ impl Protocol for WaveshareUsbCanA {
         &self,
         buffer: &[u8],
         data_out: &mut [u8; 8],
-        debug_traffic: bool,
     ) -> (usize, Option<ParsedFrameMeta>) {
-        Self::parse_next_frame(buffer, data_out, debug_traffic)
+        Self::parse_next_frame(buffer, data_out)
     }
 }

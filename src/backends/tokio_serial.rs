@@ -252,8 +252,7 @@ async fn split_background_task<P>(
             let mut parsed_frames = Vec::new();
             let consumed = protocol_read.parse_frames(
                 &rx_buffer[..rx_length],
-                &mut parsed_frames,
-                debug_traffic,
+                &mut parsed_frames
             );
 
             if consumed > 0 {
@@ -410,7 +409,6 @@ impl<P: Protocol> CanUsbClient<P> {
             let consumed = self.protocol.parse_frames(
                 &self.rx_buffer[..self.rx_length],
                 &mut parsed_frames,
-                false,
             );
 
             if consumed > 0 {
@@ -461,7 +459,6 @@ impl<P: Protocol> CanUsbClient<P> {
         let consumed = self.protocol.parse_frames(
             &self.rx_buffer[..self.rx_length],
             &mut parsed_frames,
-            false,
         );
 
         if consumed > 0 {

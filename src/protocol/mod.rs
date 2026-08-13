@@ -42,19 +42,13 @@ pub trait Protocol {
     /// Maximum size in bytes of a data frame written by
     /// [`Protocol::build_data_frame`]
     const DATA_FRAME_MAX_SIZE: usize;
-
-    /// Build the settings frame sent right after connecting.
-    ///
-    /// Returns the number of bytes written to `out`.
+    
     fn build_settings_frame(
         &self,
         config: &Self::Config,
         out: &mut [u8],
     ) -> Result<usize, &'static str>;
 
-    /// Build a wire data frame for the transmission of a CAN message.
-    ///
-    /// Returns the number of bytes written to `out`.
     fn build_data_frame(
         &self,
         frame_type: CanFrameType,
@@ -62,39 +56,24 @@ pub trait Protocol {
         data: &[u8],
         out: &mut [u8],
     ) -> Result<usize, &'static str>;
-
-    /// Scan `buffer` for the next complete incoming frame, skipping junk bytes.
-    ///
-    /// Returns `(consumed, frame)`:
-    /// - `consumed` is the number of bytes that can be dropped from the front
-    ///   of the buffer (junk bytes, plus the frame itself if one was found).
-    ///   When an incomplete frame is found, only the junk before it is
-    ///   reported as consumed so the partial frame stays in the buffer.
-    /// - `frame` is `Some(meta)` when a complete frame was parsed; its data
-    ///   (0-8 bytes) is copied into `data_out`.
+    
     fn parse_next_frame(
         &self,
         buffer: &[u8],
         data_out: &mut [u8; 8],
-        debug_traffic: bool,
     ) -> (usize, Option<ParsedFrameMeta>);
-
-    /// Parse all complete frames in `buffer`, appending them to `output`.
-    ///
-    /// Allocating convenience built on [`Protocol::parse_next_frame`].
-    /// Returns the number of bytes consumed from the buffer.
+    
     fn parse_frames(
         &self,
         buffer: &[u8],
         output: &mut Vec<ParsedFrame>,
-        debug_traffic: bool,
     ) -> usize {
         let mut total_consumed = 0;
         let mut data_out = [0u8; 8];
 
         loop {
             let (consumed, frame) =
-                self.parse_next_frame(&buffer[total_consumed..], &mut data_out, debug_traffic);
+                self.parse_next_frame(&buffer[total_consumed..], &mut data_out);
             total_consumed += consumed;
 
             match frame {

@@ -2,15 +2,23 @@
 
 A Rust library for USB-CAN adapter communication.
 
-Core protocol is `no_std` compatible. CAN message types are based on
+Core is `no_std` compatible. CAN message types are based on
 [`embedded-can`](https://docs.rs/embedded-can) (`Id`, `StandardId`, `ExtendedId`,
 `Frame` trait), with this crate's own `CanMessage` implementing it.
 
+The wire protocol is abstracted behind the `protocol::Protocol` trait — the
+USB-CAN-A binary protocol (`protocol::usb_can_a::UsbCanA`) is just one
+implementation of it.
+
 # Layout
 
+- `protocol` — wire protocol abstraction:
+  - `protocol::Protocol`: the trait (settings frame, data frame build/parse)
+  - `protocol::usb_can_a::UsbCanA`: USB-CAN-A implementation + its config
+    (`UsbCanAConfig`, `CanSpeed`, `CanMode`)
 - `backends` — transports that move bytes to/from the adapter:
   - `backends::tokio_serial` (feature `tokio-serial`, std): async serial port
-    transport (`split`, `client`, `CanUsbClient`, ...)
+    transport over a caller-opened `SerialStream` (`split`, `client`, ...)
   - `backends::embedded_io` (feature `embedded-io`, no_std): sync
     (`CanUsbClient`) + async (`AsyncCanUsbClient`) transport over any
     `embedded-io` byte stream
@@ -36,6 +44,14 @@ usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-a-rs", defaul
 
 # zencan frontend
 usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-a-rs", features = ["zencan", "log"] }
+```
+
+```rust
+// The serial port is opened by the caller; protocol is chosen explicitly
+let serial = tokio_serial::new("COM4", 2_000_000).open_native_async()?;
+let (tx, rx) = usb_can_a::backends::tokio_serial::split(
+    serial, UsbCanA, &UsbCanAConfig::default(), false,
+).await?;
 ```
 
 # examples

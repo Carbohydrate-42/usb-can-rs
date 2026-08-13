@@ -1,6 +1,7 @@
 //! Type tests
 
-use usb_can_a::types::{CanFrameType, CanMode, CanSpeed};
+use usb_can_a::protocol::usb_can_a::{CanMode, CanSpeed};
+use usb_can_a::CanFrameType;
 
 #[test]
 fn test_can_speed_try_from() {

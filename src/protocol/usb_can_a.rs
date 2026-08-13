@@ -1,10 +1,9 @@
-//! USB-CAN protocol implementation
+//! USB-CAN-A wire protocol implementation of [`Protocol`].
 
 #[allow(unused_imports)]
 use crate::logging::{debug, Hex};
-use crate::message::id_from_raw;
+use crate::protocol::{ParsedFrameMeta, Protocol};
 use crate::types::CanFrameType;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 /// USB-CAN command frame size
@@ -17,9 +16,203 @@ pub const FRAME_FOOTER: u8 = 0x55;
 pub const CMD_FRAME_MARKER: u8 = 0x55;
 /// USB-CAN frame start byte
 pub const FRAME_START: u8 = 0xAA;
+/// Max wire size of a data frame: header(2) + id(2) + data(8) + footer(1)
+pub const DATA_FRAME_MAX_SIZE: usize = 13;
+
+// ============================================
+// Protocol-specific configuration types
+// ============================================
+
+/// CAN bus speed options
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CanSpeed {
+    /// 1 Mbps
+    Bps1000000 = 0x01,
+    /// 800 Kbps
+    Bps800000 = 0x02,
+    /// 500 Kbps
+    Bps500000 = 0x03,
+    /// 400 Kbps
+    Bps400000 = 0x04,
+    /// 250 Kbps
+    Bps250000 = 0x05,
+    /// 200 Kbps
+    Bps200000 = 0x06,
+    /// 125 Kbps
+    Bps125000 = 0x07,
+    /// 100 Kbps
+    Bps100000 = 0x08,
+    /// 50 Kbps
+    Bps50000 = 0x09,
+    /// 20 Kbps
+    Bps20000 = 0x0a,
+    /// 10 Kbps
+    Bps10000 = 0x0b,
+    /// 5 Kbps
+    Bps5000 = 0x0c,
+}
+
+/// Error when parsing CAN speed
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidCanSpeed(pub u32);
+
+impl core::fmt::Display for InvalidCanSpeed {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Invalid CAN speed: {}", self.0)
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for InvalidCanSpeed {}
+
+impl TryFrom<u32> for CanSpeed {
+    type Error = InvalidCanSpeed;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1000000 => Ok(CanSpeed::Bps1000000),
+            800000 => Ok(CanSpeed::Bps800000),
+            500000 => Ok(CanSpeed::Bps500000),
+            400000 => Ok(CanSpeed::Bps400000),
+            250000 => Ok(CanSpeed::Bps250000),
+            200000 => Ok(CanSpeed::Bps200000),
+            125000 => Ok(CanSpeed::Bps125000),
+            100000 => Ok(CanSpeed::Bps100000),
+            50000 => Ok(CanSpeed::Bps50000),
+            20000 => Ok(CanSpeed::Bps20000),
+            10000 => Ok(CanSpeed::Bps10000),
+            5000 => Ok(CanSpeed::Bps5000),
+            _ => Err(InvalidCanSpeed(value)),
+        }
+    }
+}
+
+impl CanSpeed {
+    /// Get speed in bits per second
+    pub fn as_bps(&self) -> u32 {
+        match self {
+            CanSpeed::Bps1000000 => 1000000,
+            CanSpeed::Bps800000 => 800000,
+            CanSpeed::Bps500000 => 500000,
+            CanSpeed::Bps400000 => 400000,
+            CanSpeed::Bps250000 => 250000,
+            CanSpeed::Bps200000 => 200000,
+            CanSpeed::Bps125000 => 125000,
+            CanSpeed::Bps100000 => 100000,
+            CanSpeed::Bps50000 => 50000,
+            CanSpeed::Bps20000 => 20000,
+            CanSpeed::Bps10000 => 10000,
+            CanSpeed::Bps5000 => 5000,
+        }
+    }
+}
+
+/// CAN bus operation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CanMode {
+    /// Normal mode
+    Normal = 0x00,
+    /// Loopback mode
+    Loopback = 0x01,
+    /// Silent mode
+    Silent = 0x02,
+    /// Loopback + Silent mode
+    LoopbackSilent = 0x03,
+}
+
+/// Configuration of the USB-CAN-A adapter.
+#[derive(Debug, Clone)]
+pub struct UsbCanAConfig {
+    /// CAN bus speed
+    pub can_speed: CanSpeed,
+    /// CAN operation mode
+    pub can_mode: CanMode,
+    /// CAN frame type
+    pub frame_type: CanFrameType,
+    /// Filter ID (default: 0 - no filtering)
+    pub filter_id: u32,
+    /// Mask ID (default: 0 - no masking)
+    pub mask_id: u32,
+}
+
+impl Default for UsbCanAConfig {
+    fn default() -> Self {
+        Self {
+            can_speed: CanSpeed::Bps500000,
+            can_mode: CanMode::Normal,
+            frame_type: CanFrameType::Standard,
+            filter_id: 0,
+            mask_id: 0,
+        }
+    }
+}
+
+// ============================================
+// Protocol implementation
+// ============================================
+
+/// USB-CAN-A wire protocol.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UsbCanA;
+
+impl Protocol for UsbCanA {
+    type Config = UsbCanAConfig;
+
+    const SETTINGS_FRAME_MAX_SIZE: usize = CMD_FRAME_SIZE;
+    const DATA_FRAME_MAX_SIZE: usize = DATA_FRAME_MAX_SIZE;
+
+    fn build_settings_frame(
+        &self,
+        config: &Self::Config,
+        out: &mut [u8],
+    ) -> Result<usize, &'static str> {
+        if out.len() < CMD_FRAME_SIZE {
+            return Err("Output buffer too small for settings frame");
+        }
+        let frame = build_settings_frame(
+            config.can_speed as u8,
+            config.can_mode as u8,
+            config.frame_type as u8,
+            config.filter_id,
+            config.mask_id,
+        );
+        out[..CMD_FRAME_SIZE].copy_from_slice(&frame);
+        Ok(CMD_FRAME_SIZE)
+    }
+
+    fn build_data_frame(
+        &self,
+        frame_type: CanFrameType,
+        id: u32,
+        data: &[u8],
+        out: &mut [u8],
+    ) -> Result<usize, &'static str> {
+        if out.len() < DATA_FRAME_MAX_SIZE {
+            return Err("Output buffer too small for data frame");
+        }
+        let out: &mut [u8; DATA_FRAME_MAX_SIZE] =
+            (&mut out[..DATA_FRAME_MAX_SIZE]).try_into().unwrap();
+        build_data_frame_into(frame_type, id, data, out)
+    }
+
+    fn parse_next_frame(
+        &self,
+        buffer: &[u8],
+        data_out: &mut [u8; 8],
+        debug_traffic: bool,
+    ) -> (usize, Option<ParsedFrameMeta>) {
+        parse_next_frame(buffer, data_out, debug_traffic)
+    }
+}
+
+// ============================================
+// Free functions (usable without the trait)
+// ============================================
 
 /// Build a settings/command frame for USB-CAN adapter configuration
-/// 
+///
 /// Frame format (20 bytes):
 /// - Byte 0: 0xAA (start)
 /// - Byte 1: 0x55 (command marker)
@@ -67,9 +260,6 @@ pub fn build_settings_frame(
 
     frame
 }
-
-/// Max wire size of a data frame: header(2) + id(2) + data(8) + footer(1)
-pub const DATA_FRAME_MAX_SIZE: usize = 13;
 
 /// Build a data frame for transmission into a caller-provided buffer (no-alloc).
 ///
@@ -129,7 +319,7 @@ pub fn build_data_frame(
 }
 
 /// Generate checksum for command frames
-/// 
+///
 /// Sum of bytes from offset to offset+length, masked to 8 bits
 pub fn generate_checksum(data: &[u8], offset: usize, length: usize) -> u8 {
     let sum: usize = data[offset..offset + length]
@@ -137,30 +327,6 @@ pub fn generate_checksum(data: &[u8], offset: usize, length: usize) -> u8 {
         .map(|&b| b as usize)
         .sum();
     (sum & 0xFF) as u8
-}
-
-/// A parsed CAN frame from the wire
-#[derive(Debug, Clone)]
-pub struct ParsedFrame {
-    /// Frame ID (11-bit or 29-bit)
-    pub id: u16,
-    /// Frame data (0-8 bytes)
-    pub data: Vec<u8>,
-    /// True if extended frame (29-bit ID)
-    pub is_extended: bool,
-}
-
-/// Metadata of a single parsed frame (no-alloc variant).
-///
-/// Frame data is copied into the caller-provided buffer by [`parse_next_frame`].
-#[derive(Debug, Clone, Copy)]
-pub struct ParsedFrameMeta {
-    /// Frame ID (11-bit or 29-bit)
-    pub id: u16,
-    /// Data Length Code (0-8)
-    pub dlc: u8,
-    /// True if extended frame (29-bit ID)
-    pub is_extended: bool,
 }
 
 /// Scan `buffer` for the next complete frame, skipping junk bytes.
@@ -243,64 +409,4 @@ pub fn parse_next_frame(
     }
 
     (offset, None)
-}
-
-/// Parse incoming buffer and extract complete frames
-///
-/// Returns the number of bytes consumed from the buffer
-pub fn parse_frames(
-    buffer: &[u8],
-    output: &mut Vec<ParsedFrame>,
-    debug_traffic: bool,
-) -> usize {
-    let mut total_consumed = 0;
-    let mut data_out = [0u8; 8];
-
-    loop {
-        let (consumed, frame) = parse_next_frame(&buffer[total_consumed..], &mut data_out, debug_traffic);
-        total_consumed += consumed;
-
-        match frame {
-            Some(meta) => output.push(ParsedFrame {
-                id: meta.id,
-                data: data_out[..meta.dlc as usize].to_vec(),
-                is_extended: meta.is_extended,
-            }),
-            None => break,
-        }
-    }
-
-    total_consumed
-}
-
-/// Convert hex string to binary data
-///
-/// # Arguments
-/// * `hex` - Hex string (e.g., "DEADBEEF", spaces allowed)
-///
-/// # Returns
-/// Vector of bytes
-pub fn hex_to_bytes(hex: &str) -> Option<Vec<u8>> {
-    let hex: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-
-    if hex.len() % 2 != 0 {
-        return None;
-    }
-
-    (0..hex.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
-        .collect()
-}
-
-/// Parse a CAN ID from hex string
-///
-/// Supports 1-8 character hex strings for both standard (11-bit) and extended (29-bit) IDs
-pub fn parse_can_id(hex_id: &str) -> Option<embedded_can::Id> {
-    let hex: String = hex_id.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-
-    // Standard IDs are 11-bit (max 0x7FF), Extended IDs are 29-bit
-    let id = u32::from_str_radix(&hex, 16).ok()?;
-
-    id_from_raw(id)
 }

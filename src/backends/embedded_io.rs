@@ -1,37 +1,40 @@
-//! no_std adapter: `embedded-io` transport (sync and async).
+//! no_std backend: `embedded-io` transport (sync and async).
 //!
-//! Same level as the `tokio-serial` adapter, but generic over any
-//! [`embedded_io`] / [`embedded_io_async`] byte stream (UART, USB-CDC, ...),
-//! with fixed-size buffers and no heap allocation.
+//! Same level as the `tokio-serial` backend, but generic over any
+//! [`embedded_io`] / [`embedded_io_async`] byte stream (UART, USB-CDC, ...)
+//! and over the wire [`Protocol`], with fixed-size buffers and no heap
+//! allocation.
 
 use crate::frame::Frame;
 #[allow(unused_imports)]
 use crate::logging::{debug, trace, Hex};
 use crate::message::CanMessage;
-use crate::protocol::{
-    build_data_frame_into, build_settings_frame, parse_next_frame, ParsedFrameMeta,
-    DATA_FRAME_MAX_SIZE,
-};
-use crate::types::CanUsbConfig;
+use crate::protocol::{ParsedFrameMeta, Protocol};
 use embedded_can::{ExtendedId, Id, StandardId};
 
 /// Receive buffer size (bytes)
 pub const RX_BUFFER_SIZE: usize = 1024;
 
-/// Errors of the embedded-io adapter.
+/// Transmit scratch buffer size (bytes).
+///
+/// Must be at least the protocol's `SETTINGS_FRAME_MAX_SIZE` and
+/// `DATA_FRAME_MAX_SIZE`; protocol methods validate and error out otherwise.
+pub const TX_BUFFER_SIZE: usize = 64;
+
+/// Errors of the embedded-io backend.
 #[derive(Debug)]
 pub enum EmbeddedIoError<E> {
     /// Underlying IO error
     Io(E),
-    /// Frame data too long (max 8 bytes)
-    FrameTooLarge,
+    /// Protocol error (frame build/parse failure)
+    Protocol(&'static str),
 }
 
 impl<E: core::fmt::Debug> core::fmt::Display for EmbeddedIoError<E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             EmbeddedIoError::Io(e) => write!(f, "IO error: {:?}", e),
-            EmbeddedIoError::FrameTooLarge => write!(f, "Frame too large"),
+            EmbeddedIoError::Protocol(e) => write!(f, "Protocol error: {}", e),
         }
     }
 }
@@ -55,42 +58,45 @@ fn meta_to_message(meta: &ParsedFrameMeta, data: &[u8]) -> Option<CanMessage> {
     CanMessage::new(can_id, &data[..meta.dlc as usize])
 }
 
-fn build_frame_bytes(frame: &Frame, out: &mut [u8; DATA_FRAME_MAX_SIZE]) -> Result<usize, &'static str> {
-    build_data_frame_into(frame.frame_type, frame.raw_id(), frame.data(), out)
-}
-
 // ============================================
 // Blocking (sync) client
 // ============================================
 
-/// Blocking CAN USB client over an [`embedded_io::Read`] + [`embedded_io::Write`] stream.
-pub struct CanUsbClient<IO> {
+/// Blocking CAN adapter client over an [`embedded_io::Read`] + [`embedded_io::Write`] stream.
+pub struct CanUsbClient<IO, P: Protocol> {
     io: IO,
-    config: CanUsbConfig,
+    protocol: P,
+    config: P::Config,
+    debug_traffic: bool,
     rx_buffer: [u8; RX_BUFFER_SIZE],
     rx_length: usize,
 }
 
-impl<IO> CanUsbClient<IO>
+impl<IO, P> CanUsbClient<IO, P>
 where
     IO: ::embedded_io::Read + ::embedded_io::Write,
+    P: Protocol,
 {
     /// Create a new client and send the adapter settings frame.
-    pub fn new(mut io: IO, config: CanUsbConfig) -> Result<Self, EmbeddedIoError<IO::Error>> {
-        let settings = build_settings_frame(
-            config.can_speed as u8,
-            config.can_mode as u8,
-            config.frame_type as u8,
-            config.filter_id,
-            config.mask_id,
-        );
-        io.write_all(&settings)?;
+    pub fn new(
+        mut io: IO,
+        protocol: P,
+        config: P::Config,
+        debug_traffic: bool,
+    ) -> Result<Self, EmbeddedIoError<IO::Error>> {
+        let mut buf = [0u8; TX_BUFFER_SIZE];
+        let len = protocol
+            .build_settings_frame(&config, &mut buf)
+            .map_err(EmbeddedIoError::Protocol)?;
+        io.write_all(&buf[..len])?;
         io.flush()?;
         debug!("Settings sent successfully");
 
         Ok(Self {
             io,
+            protocol,
             config,
+            debug_traffic,
             rx_buffer: [0u8; RX_BUFFER_SIZE],
             rx_length: 0,
         })
@@ -106,12 +112,20 @@ where
         &mut self.io
     }
 
+    /// Get a reference to the protocol configuration.
+    pub fn config(&self) -> &P::Config {
+        &self.config
+    }
+
     /// Send a CAN frame.
     pub fn write_frame(&mut self, frame: &Frame) -> Result<(), EmbeddedIoError<IO::Error>> {
-        let mut buf = [0u8; DATA_FRAME_MAX_SIZE];
-        let len = build_frame_bytes(frame, &mut buf).map_err(|_| EmbeddedIoError::FrameTooLarge)?;
+        let mut buf = [0u8; TX_BUFFER_SIZE];
+        let len = self
+            .protocol
+            .build_data_frame(frame.frame_type, frame.raw_id(), frame.data(), &mut buf)
+            .map_err(EmbeddedIoError::Protocol)?;
 
-        if self.config.debug_traffic {
+        if self.debug_traffic {
             trace!("TX: {:?}", Hex(&buf[..len]));
         }
 
@@ -123,10 +137,10 @@ where
     /// Parse already-buffered data without touching the IO stream.
     pub fn try_read(&mut self) -> Option<CanMessage> {
         let mut data = [0u8; 8];
-        let (consumed, meta) = parse_next_frame(
+        let (consumed, meta) = self.protocol.parse_next_frame(
             &self.rx_buffer[..self.rx_length],
             &mut data,
-            self.config.debug_traffic,
+            self.debug_traffic,
         );
 
         if consumed > 0 {
@@ -152,7 +166,7 @@ where
 
         let n = self.io.read(&mut self.rx_buffer[self.rx_length..])?;
         if n > 0 {
-            if self.config.debug_traffic {
+            if self.debug_traffic {
                 trace!("RX raw: {:?}", Hex(&self.rx_buffer[self.rx_length..self.rx_length + n]));
             }
             self.rx_length += n;
@@ -178,34 +192,41 @@ where
 // Async client
 // ============================================
 
-/// Async CAN USB client over an [`embedded_io_async::Read`] + [`embedded_io_async::Write`] stream.
-pub struct AsyncCanUsbClient<IO> {
+/// Async CAN adapter client over an [`embedded_io_async::Read`] + [`embedded_io_async::Write`] stream.
+pub struct AsyncCanUsbClient<IO, P: Protocol> {
     io: IO,
-    config: CanUsbConfig,
+    protocol: P,
+    config: P::Config,
+    debug_traffic: bool,
     rx_buffer: [u8; RX_BUFFER_SIZE],
     rx_length: usize,
 }
 
-impl<IO> AsyncCanUsbClient<IO>
+impl<IO, P> AsyncCanUsbClient<IO, P>
 where
     IO: ::embedded_io_async::Read + ::embedded_io_async::Write,
+    P: Protocol,
 {
     /// Create a new client and send the adapter settings frame.
-    pub async fn new(mut io: IO, config: CanUsbConfig) -> Result<Self, EmbeddedIoError<IO::Error>> {
-        let settings = build_settings_frame(
-            config.can_speed as u8,
-            config.can_mode as u8,
-            config.frame_type as u8,
-            config.filter_id,
-            config.mask_id,
-        );
-        io.write_all(&settings).await?;
+    pub async fn new(
+        mut io: IO,
+        protocol: P,
+        config: P::Config,
+        debug_traffic: bool,
+    ) -> Result<Self, EmbeddedIoError<IO::Error>> {
+        let mut buf = [0u8; TX_BUFFER_SIZE];
+        let len = protocol
+            .build_settings_frame(&config, &mut buf)
+            .map_err(EmbeddedIoError::Protocol)?;
+        io.write_all(&buf[..len]).await?;
         io.flush().await?;
         debug!("Settings sent successfully");
 
         Ok(Self {
             io,
+            protocol,
             config,
+            debug_traffic,
             rx_buffer: [0u8; RX_BUFFER_SIZE],
             rx_length: 0,
         })
@@ -221,12 +242,20 @@ where
         &mut self.io
     }
 
+    /// Get a reference to the protocol configuration.
+    pub fn config(&self) -> &P::Config {
+        &self.config
+    }
+
     /// Send a CAN frame.
     pub async fn write_frame(&mut self, frame: &Frame) -> Result<(), EmbeddedIoError<IO::Error>> {
-        let mut buf = [0u8; DATA_FRAME_MAX_SIZE];
-        let len = build_frame_bytes(frame, &mut buf).map_err(|_| EmbeddedIoError::FrameTooLarge)?;
+        let mut buf = [0u8; TX_BUFFER_SIZE];
+        let len = self
+            .protocol
+            .build_data_frame(frame.frame_type, frame.raw_id(), frame.data(), &mut buf)
+            .map_err(EmbeddedIoError::Protocol)?;
 
-        if self.config.debug_traffic {
+        if self.debug_traffic {
             trace!("TX: {:?}", Hex(&buf[..len]));
         }
 
@@ -238,10 +267,10 @@ where
     /// Parse already-buffered data without touching the IO stream.
     pub fn try_read(&mut self) -> Option<CanMessage> {
         let mut data = [0u8; 8];
-        let (consumed, meta) = parse_next_frame(
+        let (consumed, meta) = self.protocol.parse_next_frame(
             &self.rx_buffer[..self.rx_length],
             &mut data,
-            self.config.debug_traffic,
+            self.debug_traffic,
         );
 
         if consumed > 0 {
@@ -266,7 +295,7 @@ where
 
             let n = self.io.read(&mut self.rx_buffer[self.rx_length..]).await?;
             if n > 0 {
-                if self.config.debug_traffic {
+                if self.debug_traffic {
                     trace!("RX raw: {:?}", Hex(&self.rx_buffer[self.rx_length..self.rx_length + n]));
                 }
                 self.rx_length += n;

@@ -1,7 +1,10 @@
 //! USB-CAN-A adapter driver.
 //!
-//! Core protocol is `no_std` compatible (requires `alloc` for the parsing
-//! convenience APIs). I/O is organized in two layers:
+//! The core is `no_std` compatible (requires `alloc` for the parsing
+//! convenience APIs). The wire protocol is abstracted behind
+//! [`protocol::Protocol`]; the USB-CAN-A binary protocol
+//! ([`protocol::usb_can_a::UsbCanA`]) is one implementation of it.
+//! I/O is organized in two layers:
 //!
 //! - [`backends`] — transports that move bytes to/from the adapter:
 //!   - `tokio-serial` (std): [`backends::tokio_serial`]
@@ -32,5 +35,6 @@ pub use embedded_can::{ExtendedId, Id, StandardId};
 // Re-export our modules
 pub use frame::Frame;
 pub use message::CanMessage;
-pub use protocol::{hex_to_bytes, parse_can_id};
-pub use types::{CanFrameType, CanMode, CanSpeed, CanUsbConfig, InvalidCanSpeed, PayloadMode};
+pub use protocol::usb_can_a::{CanMode, CanSpeed, InvalidCanSpeed, UsbCanA, UsbCanAConfig};
+pub use protocol::{hex_to_bytes, parse_can_id, ParsedFrame, ParsedFrameMeta, Protocol};
+pub use types::{CanFrameType, PayloadMode};

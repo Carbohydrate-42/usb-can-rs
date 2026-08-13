@@ -8,12 +8,15 @@ use tokio::sync::mpsc;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender, CanSendError};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 
+use crate::backends::tokio_serial::{split, CanUsbSender, ClientError};
 use crate::message::CanMessage;
-use crate::backends::tokio_serial::{split, CanUsbSender, ClientError, TokioSerialConfig};
+use crate::protocol::Protocol;
 use embedded_can::{ExtendedId, Id, StandardId};
 
 /// Convert a zencan message into this crate's `embedded-can` based message.
-fn from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
+///
+/// Returns `None` if the ID or DLC is out of range.
+pub fn message_from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
     let id = match msg.id {
         CanId::Std(raw) => Id::Standard(StandardId::new(raw)?),
         CanId::Extended(raw) => Id::Extended(ExtendedId::new(raw)?),
@@ -25,8 +28,8 @@ fn from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
     }
 }
 
-/// Convert our message into a zencan message.
-fn to_zencan(msg: &CanMessage) -> ZenCanMessage {
+/// Convert this crate's message into a zencan message.
+pub fn message_to_zencan(msg: &CanMessage) -> ZenCanMessage {
     let id = match msg.id() {
         Id::Standard(std) => CanId::Std(std.as_raw()),
         Id::Extended(ext) => CanId::Extended(ext.as_raw()),
@@ -95,7 +98,7 @@ impl AsyncCanSender for ZenCanSender {
     type Error = ZenCanSendError;
 
     async fn send(&mut self, msg: ZenCanMessage) -> Result<(), Self::Error> {
-        let converted = from_zencan(&msg)
+        let converted = message_from_zencan(&msg)
             .ok_or_else(|| ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg.clone())))?;
 
         self.inner.send(converted.into()).await.map_err(|e| {
@@ -131,11 +134,11 @@ impl AsyncCanReceiver for ZenCanReceiver {
     type Error = ZenCanRecvError;
 
     fn try_recv(&mut self) -> Option<ZenCanMessage> {
-        self.inner.try_recv().ok().map(|m| to_zencan(&m))
+        self.inner.try_recv().ok().map(|m| message_to_zencan(&m))
     }
 
     async fn recv(&mut self) -> Result<ZenCanMessage, Self::Error> {
-        self.inner.recv().await.map(|m| to_zencan(&m)).ok_or_else(|| {
+        self.inner.recv().await.map(|m| message_to_zencan(&m)).ok_or_else(|| {
             ZenCanRecvError("Channel closed".to_string())
         })
     }
@@ -148,72 +151,22 @@ impl AsyncCanReceiver for ZenCanReceiver {
 /// Split function dedicated to zencan's BusManager
 ///
 /// Returns a sender and receiver that can be passed directly to `BusManager::new`.
-pub async fn split_for_zencan(
-    config: TokioSerialConfig,
-) -> Result<(ZenCanSender, ZenCanReceiver), ClientError> {
-    let (tx, rx) = split(config).await?;
+///
+/// # Arguments
+/// * `serial` - serial port opened by the caller (e.g. via `open_native_async`)
+/// * `protocol` - wire protocol implementation (e.g. [`crate::UsbCanA`])
+/// * `config` - protocol-specific configuration
+/// * `debug_traffic` - log raw wire traffic
+pub async fn split_for_zencan<P>(
+    serial: tokio_serial::SerialStream,
+    protocol: P,
+    config: &P::Config,
+    debug_traffic: bool,
+) -> Result<(ZenCanSender, ZenCanReceiver), ClientError>
+where
+    P: Protocol + Send + Sync + 'static,
+    P::Config: Send + Sync + 'static,
+{
+    let (tx, rx) = split(serial, protocol, config, debug_traffic).await?;
     Ok((ZenCanSender::new(tx), ZenCanReceiver::new(rx)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_standard_message_roundtrip() {
-        let zen = ZenCanMessage::new(CanId::Std(0x123), &[0x11, 0x22, 0x33]);
-        let ours = from_zencan(&zen).unwrap();
-
-        assert_eq!(ours.id(), Id::Standard(StandardId::new(0x123).unwrap()));
-        assert_eq!(ours.data(), &[0x11, 0x22, 0x33]);
-        assert!(!ours.is_rtr());
-
-        let back = to_zencan(&ours);
-        assert_eq!(back.id, CanId::Std(0x123));
-        assert_eq!(back.data(), &[0x11, 0x22, 0x33]);
-        assert!(!back.rtr);
-    }
-
-    #[test]
-    fn test_extended_message_roundtrip() {
-        let zen = ZenCanMessage::new(CanId::Extended(0x1ABCDE), &[0xAA]);
-        let ours = from_zencan(&zen).unwrap();
-
-        assert_eq!(ours.id(), Id::Extended(ExtendedId::new(0x1ABCDE).unwrap()));
-        assert_eq!(ours.data(), &[0xAA]);
-
-        let back = to_zencan(&ours);
-        assert_eq!(back.id, CanId::Extended(0x1ABCDE));
-        assert_eq!(back.data(), &[0xAA]);
-    }
-
-    #[test]
-    fn test_rtr_message_roundtrip() {
-        let zen = ZenCanMessage::new_rtr(CanId::Std(0x100));
-        let ours = from_zencan(&zen).unwrap();
-
-        assert!(ours.is_rtr());
-        assert_eq!(ours.data(), &[]);
-
-        let back = to_zencan(&ours);
-        assert!(back.rtr);
-        assert_eq!(back.id, CanId::Std(0x100));
-    }
-
-    #[test]
-    fn test_invalid_standard_id_rejected() {
-        // 0x800 does not fit in 11 bits
-        let zen = ZenCanMessage::new(CanId::Std(0x800), &[]);
-        assert!(from_zencan(&zen).is_none());
-    }
-
-    #[test]
-    fn test_empty_data_roundtrip() {
-        let zen = ZenCanMessage::new(CanId::Std(0x1), &[]);
-        let ours = from_zencan(&zen).unwrap();
-        assert_eq!(ours.dlc(), 0);
-
-        let back = to_zencan(&ours);
-        assert_eq!(back.data(), &[]);
-    }
 }

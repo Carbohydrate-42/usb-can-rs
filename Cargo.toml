@@ -59,6 +59,10 @@ required-features = ["embedded-io", "log"]
 name = "embedded_io_tests"
 required-features = ["embedded-io"]
 
+[[test]]
+name = "zencan_tests"
+required-features = ["zencan"]
+
 [lib]
 name = "usb_can_a"
 path = "src/lib.rs"

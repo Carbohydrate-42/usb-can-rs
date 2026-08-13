@@ -1,9 +1,9 @@
 //! Demo of the `zencan` frontend: split the adapter into a sender/receiver
 //! pair that can be handed to zencan's `BusManager`.
 
-use usb_can_a::backends::tokio_serial::TokioSerialConfig;
+use tokio_serial::SerialPortBuilderExt;
 use usb_can_a::frontends::zencan::split_for_zencan;
-use usb_can_a::{CanFrameType, CanSpeed, CanUsbConfig};
+use usb_can_a::{CanFrameType, CanSpeed, UsbCanA, UsbCanAConfig};
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
 use zencan_common::{CanId, CanMessage};
 
@@ -11,18 +11,21 @@ use zencan_common::{CanId, CanMessage};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
-	let config = TokioSerialConfig {
-		device: "COM4".to_string(),
-		baudrate: 2_000_000,
-		can: CanUsbConfig {
-			can_speed: CanSpeed::Bps1000000,
-			frame_type: CanFrameType::Standard,
-			..Default::default()
-		},
+	// The serial port is opened by the caller
+	let serial = tokio_serial::new("COM4", 2_000_000)
+		.data_bits(tokio_serial::DataBits::Eight)
+		.stop_bits(tokio_serial::StopBits::Two)
+		.parity(tokio_serial::Parity::None)
+		.open_native_async()?;
+
+	let config = UsbCanAConfig {
+		can_speed: CanSpeed::Bps1000000,
+		frame_type: CanFrameType::Standard,
+		..Default::default()
 	};
 
 	// (sender, receiver) compatible with zencan's BusManager::new
-	let (mut tx, mut rx) = split_for_zencan(config).await?;
+	let (mut tx, mut rx) = split_for_zencan(serial, UsbCanA, &config, false).await?;
 
 	// Send via the zencan AsyncCanSender trait
 	let msg = CanMessage::new(CanId::Std(0x123), &[0x11, 0x22]);

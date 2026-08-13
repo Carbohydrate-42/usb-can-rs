@@ -1,43 +1,23 @@
 //! std backend: tokio-serial transport.
 //!
-//! Async CAN USB client over a serial port, supporting both a channel-style
-//! split mode and an exclusive client mode.
+//! Async CAN adapter client over a serial port, supporting both a
+//! channel-style split mode and an exclusive client mode.
+//!
+//! The serial port is opened by the caller and passed in as a
+//! [`tokio_serial::SerialStream`]; the backend is generic over the wire
+//! [`Protocol`].
 
 use crate::frame::Frame;
 #[allow(unused_imports)]
 use crate::logging::{error, info, trace, Fmt, Hex};
 use crate::message::CanMessage;
-use crate::protocol::{build_data_frame, build_settings_frame, parse_frames};
-use crate::types::CanUsbConfig;
+use crate::protocol::{ParsedFrame, Protocol};
 use embedded_can::{ExtendedId, Id, StandardId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, Mutex};
 use tokio::time::{sleep, timeout};
-use tokio_serial::SerialPortBuilderExt;
-
-/// Serial transport configuration (device path + baudrate + CAN settings).
-#[derive(Debug, Clone)]
-pub struct TokioSerialConfig {
-    /// Serial device path (e.g., "/dev/ttyUSB0" or "COM4")
-    pub device: String,
-    /// Serial baudrate (default: 2000000)
-    pub baudrate: u32,
-    /// CAN-side configuration
-    pub can: CanUsbConfig,
-}
-
-impl TokioSerialConfig {
-    /// Create a config for the given device with default CAN settings.
-    pub fn new(device: impl Into<String>) -> Self {
-        Self {
-            device: device.into(),
-            baudrate: 2_000_000,
-            can: CanUsbConfig::default(),
-        }
-    }
-}
 
 /// Client errors
 #[derive(Debug)]
@@ -46,8 +26,8 @@ pub enum ClientError {
     Serial(tokio_serial::Error),
     /// IO error
     Io(std::io::Error),
-    /// Frame too large
-    FrameTooLarge,
+    /// Protocol error (frame build/parse failure)
+    Protocol(&'static str),
     /// Write timeout
     WriteTimeout,
     /// Read timeout
@@ -65,7 +45,7 @@ impl core::fmt::Display for ClientError {
         match self {
             ClientError::Serial(e) => write!(f, "Serial port error: {}", e),
             ClientError::Io(e) => write!(f, "IO error: {}", e),
-            ClientError::FrameTooLarge => write!(f, "Frame too large"),
+            ClientError::Protocol(e) => write!(f, "Protocol error: {}", e),
             ClientError::WriteTimeout => write!(f, "Write timeout"),
             ClientError::ReadTimeout => write!(f, "Read timeout"),
             ClientError::SendError(e) => write!(f, "Send error: {}", e),
@@ -112,7 +92,7 @@ impl From<mpsc::error::SendError<Frame>> for ClientError {
 }
 
 /// Convert a parsed wire frame into a [`CanMessage`].
-fn parsed_to_message(parsed: &crate::protocol::ParsedFrame) -> Option<CanMessage> {
+fn parsed_to_message(parsed: &ParsedFrame) -> Option<CanMessage> {
     let can_id = if parsed.is_extended {
         Id::Extended(ExtendedId::new(parsed.id as u32)?)
     } else {
@@ -148,21 +128,27 @@ impl CanUsbSender {
     }
 }
 
-/// Create split mode, returning (sender, receiver)
+/// Create split mode over an already-opened serial port, returning (sender, receiver)
 ///
 /// The sender can be cloned, supporting multiple concurrent producers.
 /// The receiver is unique and yields incoming CAN messages.
-pub async fn split(
-    config: TokioSerialConfig,
-) -> Result<(CanUsbSender, mpsc::Receiver<CanMessage>), ClientError> {
-    info!("Creating Split mode: {} @ {} baud", Fmt(&config.device), config.baudrate);
-
-    // Open the serial port
-    let serial = tokio_serial::new(&config.device, config.baudrate)
-        .data_bits(tokio_serial::DataBits::Eight)
-        .stop_bits(tokio_serial::StopBits::Two)
-        .parity(tokio_serial::Parity::None)
-        .open_native_async()?;
+///
+/// # Arguments
+/// * `serial` - serial port opened by the caller (e.g. via `open_native_async`)
+/// * `protocol` - wire protocol implementation (e.g. [`crate::UsbCanA`])
+/// * `config` - protocol-specific configuration
+/// * `debug_traffic` - log raw wire traffic
+pub async fn split<P>(
+    serial: tokio_serial::SerialStream,
+    protocol: P,
+    config: &P::Config,
+    debug_traffic: bool,
+) -> Result<(CanUsbSender, mpsc::Receiver<CanMessage>), ClientError>
+where
+    P: Protocol + Send + Sync + 'static,
+    P::Config: Send + Sync + 'static,
+{
+    info!("Creating split mode");
 
     let serial = Arc::new(Mutex::new(serial));
 
@@ -173,15 +159,12 @@ pub async fn split(
 
     // Send the initial settings frame
     {
-        let settings = build_settings_frame(
-            config.can.can_speed as u8,
-            config.can.can_mode as u8,
-            config.can.frame_type as u8,
-            config.can.filter_id,
-            config.can.mask_id,
-        );
+        let mut buf = [0u8; 64];
+        let len = protocol
+            .build_settings_frame(config, &mut buf)
+            .map_err(ClientError::Protocol)?;
         let mut port = serial.lock().await;
-        port.write_all(&settings).await?;
+        port.write_all(&buf[..len]).await?;
         port.flush().await?;
         sleep(Duration::from_millis(100)).await;
     }
@@ -190,9 +173,10 @@ pub async fn split(
     // Spawn the background task
     tokio::spawn(split_background_task(
         serial,
+        protocol,
         frame_rx,
         msg_tx,
-        config,
+        debug_traffic,
     ));
 
     let sender = CanUsbSender { frame_tx };
@@ -204,20 +188,24 @@ pub async fn split(
 ///
 /// Two tasks are spawned, one dedicated to writing and one to reading,
 /// avoiding Mutex contention and exploiting the full-duplex serial port.
-async fn split_background_task(
+async fn split_background_task<P>(
     serial: Arc<Mutex<tokio_serial::SerialStream>>,
+    protocol: P,
     mut frame_rx: mpsc::Receiver<Frame>,
     msg_tx: mpsc::Sender<CanMessage>,
-    config: TokioSerialConfig,
-) {
+    debug_traffic: bool,
+) where
+    P: Protocol + Send + Sync + 'static,
+{
     // No coordination channel between the two tasks is needed:
     // the serial port is full-duplex, so reads and writes run truly in parallel.
 
     let serial_read = serial.clone();
     let serial_write = serial;
 
-    let config_read = config.clone();
-    let config_write = config;
+    let protocol = Arc::new(protocol);
+    let protocol_read = protocol.clone();
+    let protocol_write = protocol;
 
     // Read task
     let read_task = tokio::spawn(async move {
@@ -248,7 +236,7 @@ async fn split_background_task(
                 continue;
             }
 
-            if config_read.can.debug_traffic {
+            if debug_traffic {
                 trace!("RX raw: {:?}", Hex(&temp[..bytes_read]));
             }
 
@@ -262,10 +250,10 @@ async fn split_background_task(
 
             // Parse frames
             let mut parsed_frames = Vec::new();
-            let consumed = parse_frames(
+            let consumed = protocol_read.parse_frames(
                 &rx_buffer[..rx_length],
                 &mut parsed_frames,
-                config_read.can.debug_traffic
+                debug_traffic,
             );
 
             if consumed > 0 {
@@ -295,12 +283,14 @@ async fn split_background_task(
     let write_task = tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
             // Build the wire data frame
-            let data = match build_data_frame(
+            let mut buf = [0u8; 64];
+            let len = match protocol_write.build_data_frame(
                 frame.frame_type,
                 frame.raw_id(),
-                frame.data()
+                frame.data(),
+                &mut buf,
             ) {
-                Ok(d) => d,
+                Ok(n) => n,
                 Err(_) => {
                     error!("Frame too large, dropping");
                     continue;
@@ -316,11 +306,11 @@ async fn split_background_task(
                 }
             };
 
-            if config_write.can.debug_traffic {
-                trace!("TX: {:?}", Hex(&data));
+            if debug_traffic {
+                trace!("TX: {:?}", Hex(&buf[..len]));
             }
 
-            if let Err(_e) = port.write_all(&data).await {
+            if let Err(_e) = port.write_all(&buf[..len]).await {
                 error!("Serial write error: {}", Fmt(&_e));
                 return;
             }
@@ -347,28 +337,31 @@ async fn split_background_task(
 // ============================================
 
 /// Exclusive client; only one of read or write can be in progress at a time
-pub struct CanUsbClient {
+pub struct CanUsbClient<P: Protocol> {
     serial: tokio_serial::SerialStream,
-    config: TokioSerialConfig,
+    protocol: P,
+    config: P::Config,
+    debug_traffic: bool,
     rx_buffer: Vec<u8>,
     rx_length: usize,
     temp: Vec<u8>,
 }
 
-impl CanUsbClient {
-    /// Create a new client (exclusive ownership of the serial port)
-    pub async fn new(config: TokioSerialConfig) -> Result<Self, ClientError> {
-        info!("Creating Client mode: {} @ {} baud", Fmt(&config.device), config.baudrate);
-
-        let serial = tokio_serial::new(&config.device, config.baudrate)
-            .data_bits(tokio_serial::DataBits::Eight)
-            .stop_bits(tokio_serial::StopBits::Two)
-            .parity(tokio_serial::Parity::None)
-            .open_native_async()?;
+impl<P: Protocol> CanUsbClient<P> {
+    /// Create a new client over an already-opened serial port (exclusive ownership)
+    pub async fn new(
+        serial: tokio_serial::SerialStream,
+        protocol: P,
+        config: P::Config,
+        debug_traffic: bool,
+    ) -> Result<Self, ClientError> {
+        info!("Creating client mode");
 
         let mut client = Self {
             serial,
-            config: config.clone(),
+            protocol,
+            config,
+            debug_traffic,
             rx_buffer: vec![0u8; 1024],
             rx_length: 0,
             temp: vec![0u8; 256],
@@ -380,14 +373,12 @@ impl CanUsbClient {
     }
 
     async fn send_settings(&mut self) -> Result<(), ClientError> {
-        let frame = build_settings_frame(
-            self.config.can.can_speed as u8,
-            self.config.can.can_mode as u8,
-            self.config.can.frame_type as u8,
-            self.config.can.filter_id,
-            self.config.can.mask_id,
-        );
-        self.serial.write_all(&frame).await?;
+        let mut buf = [0u8; 64];
+        let len = self
+            .protocol
+            .build_settings_frame(&self.config, &mut buf)
+            .map_err(ClientError::Protocol)?;
+        self.serial.write_all(&buf[..len]).await?;
         self.serial.flush().await?;
         sleep(Duration::from_millis(100)).await;
         info!("Settings sent successfully");
@@ -395,14 +386,17 @@ impl CanUsbClient {
     }
 
     pub async fn write(&mut self, frame: &Frame) -> Result<(), ClientError> {
-        let data = build_data_frame(frame.frame_type, frame.raw_id(), frame.data())
-            .map_err(|_| ClientError::FrameTooLarge)?;
+        let mut buf = [0u8; 64];
+        let len = self
+            .protocol
+            .build_data_frame(frame.frame_type, frame.raw_id(), frame.data(), &mut buf)
+            .map_err(ClientError::Protocol)?;
 
-        if self.config.can.debug_traffic {
-            trace!("TX: {:?}", Hex(&data));
+        if self.debug_traffic {
+            trace!("TX: {:?}", Hex(&buf[..len]));
         }
 
-        self.serial.write_all(&data).await?;
+        self.serial.write_all(&buf[..len]).await?;
         self.serial.flush().await?;
         Ok(())
     }
@@ -413,7 +407,11 @@ impl CanUsbClient {
         loop {
             // Try parsing the buffer first
             let mut parsed_frames = Vec::new();
-            let consumed = parse_frames(&self.rx_buffer[..self.rx_length], &mut parsed_frames, false);
+            let consumed = self.protocol.parse_frames(
+                &self.rx_buffer[..self.rx_length],
+                &mut parsed_frames,
+                false,
+            );
 
             if consumed > 0 {
                 self.rx_buffer.copy_within(consumed..self.rx_length, 0);
@@ -441,7 +439,7 @@ impl CanUsbClient {
                     )));
                 }
                 Ok(Ok(n)) => {
-                    if self.config.can.debug_traffic {
+                    if self.debug_traffic {
                         trace!("RX raw: {:?}", Hex(&self.temp[..n]));
                     }
 
@@ -460,7 +458,11 @@ impl CanUsbClient {
 
     pub fn try_read(&mut self) -> Result<Option<CanMessage>, ClientError> {
         let mut parsed_frames = Vec::new();
-        let consumed = parse_frames(&self.rx_buffer[..self.rx_length], &mut parsed_frames, false);
+        let consumed = self.protocol.parse_frames(
+            &self.rx_buffer[..self.rx_length],
+            &mut parsed_frames,
+            false,
+        );
 
         if consumed > 0 {
             self.rx_buffer.copy_within(consumed..self.rx_length, 0);
@@ -478,6 +480,11 @@ impl CanUsbClient {
 }
 
 /// Convenience function: create a client directly
-pub async fn client(config: TokioSerialConfig) -> Result<CanUsbClient, ClientError> {
-    CanUsbClient::new(config).await
+pub async fn client<P: Protocol>(
+    serial: tokio_serial::SerialStream,
+    protocol: P,
+    config: P::Config,
+    debug_traffic: bool,
+) -> Result<CanUsbClient<P>, ClientError> {
+    CanUsbClient::new(serial, protocol, config, debug_traffic).await
 }

@@ -58,5 +58,6 @@ let (tx, rx) = usb_can::adapters::tokio_serial::CanUsbSender::split(
 # Require a real adapter on COM4
 cargo run --example tokio_serial_client --features tokio-serial,log
 cargo run --example tokio_serial_split --features tokio-serial,log
+cargo run --example tokio_serial_loopback --features tokio-serial,log
 cargo run --example zencan_tokio_serial --features zencan,log
 ```

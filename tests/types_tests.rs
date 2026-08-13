@@ -1,7 +1,6 @@
 //! Type tests
 
 use usb_can::protocol::wareshare_usb_can_a::{CanMode, CanSpeed};
-use usb_can::CanFrameType;
 
 #[test]
 fn test_can_speed_try_from() {
@@ -30,10 +29,4 @@ fn test_can_mode_values() {
     assert_eq!(CanMode::Loopback as u8, 0x01);
     assert_eq!(CanMode::Silent as u8, 0x02);
     assert_eq!(CanMode::LoopbackSilent as u8, 0x03);
-}
-
-#[test]
-fn test_can_frame_type_values() {
-    assert_eq!(CanFrameType::Standard as u8, 0x01);
-    assert_eq!(CanFrameType::Extended as u8, 0x02);
 }

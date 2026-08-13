@@ -3,8 +3,8 @@
 #[allow(unused_imports)]
 use crate::logging::{debug, Hex};
 use crate::protocol::{ParsedFrameMeta, Protocol};
-use crate::types::CanFrameType;
 use alloc::vec::Vec;
+use embedded_can::{Frame, Id};
 
 /// USB-CAN command frame size
 pub const CMD_FRAME_SIZE: usize = 20;
@@ -129,8 +129,8 @@ pub struct Config {
     pub can_speed: CanSpeed,
     /// CAN operation mode
     pub can_mode: CanMode,
-    /// CAN frame type
-    pub frame_type: CanFrameType,
+    /// Use extended (29-bit) CAN IDs instead of standard (11-bit) ones
+    pub extended_ids: bool,
     /// Filter ID (default: 0 - no filtering)
     pub filter_id: u32,
     /// Mask ID (default: 0 - no masking)
@@ -142,7 +142,7 @@ impl Default for Config {
         Self {
             can_speed: CanSpeed::Bps500000,
             can_mode: CanMode::Normal,
-            frame_type: CanFrameType::Standard,
+            extended_ids: false,
             filter_id: 0,
             mask_id: 0,
         }
@@ -169,7 +169,7 @@ impl WaveshareUsbCanA {
     /// - Byte 1: 0x55 (command marker)
     /// - Byte 2: 0x12 (command type)
     /// - Byte 3: speed
-    /// - Byte 4: frame_type
+    /// - Byte 4: ID type (0x01 = standard, 0x02 = extended)
     /// - Byte 5-8: filter_id (little endian)
     /// - Byte 9-12: mask_id (little endian)
     /// - Byte 13: mode
@@ -179,7 +179,7 @@ impl WaveshareUsbCanA {
     pub fn build_settings_frame(
         speed: u8,
         mode: u8,
-        frame_type: u8,
+        extended_ids: bool,
         filter_id: u32,
         mask_id: u32,
     ) -> [u8; CMD_FRAME_SIZE] {
@@ -189,7 +189,7 @@ impl WaveshareUsbCanA {
         frame[1] = CMD_FRAME_MARKER;
         frame[2] = 0x12;
         frame[3] = speed;
-        frame[4] = frame_type;
+        frame[4] = if extended_ids { 0x02 } else { 0x01 };
 
         // Filter ID (byte 5-8) - little endian
         frame[5] = (filter_id & 0xFF) as u8;
@@ -223,8 +223,7 @@ impl WaveshareUsbCanA {
     ///
     /// Returns the number of bytes written to `out`.
     pub fn build_data_frame_into(
-        frame_type: CanFrameType,
-        id: u32,
+        id: Id,
         data: &[u8],
         out: &mut [u8; DATA_FRAME_MAX_SIZE],
     ) -> Result<usize, &'static str> {
@@ -232,20 +231,25 @@ impl WaveshareUsbCanA {
             return Err("Data too long (max 8 bytes)");
         }
 
+        let (raw_id, is_extended) = match id {
+            Id::Standard(id) => (id.as_raw() as u32, false),
+            Id::Extended(id) => (id.as_raw(), true),
+        };
+
         // Start byte
         out[0] = FRAME_START;
 
         // Info byte: 0xC0 | extended_flag | dlc
         let mut info: u8 = 0xC0;
-        if frame_type == CanFrameType::Extended {
+        if is_extended {
             info |= 0x20;
         }
         info |= data.len() as u8;
         out[1] = info;
 
         // ID (little endian)
-        out[2] = (id & 0xFF) as u8;
-        out[3] = ((id >> 8) & 0xFF) as u8;
+        out[2] = (raw_id & 0xFF) as u8;
+        out[3] = ((raw_id >> 8) & 0xFF) as u8;
 
         // Data
         out[4..4 + data.len()].copy_from_slice(data);
@@ -259,13 +263,9 @@ impl WaveshareUsbCanA {
     /// Build a data frame for transmission
     ///
     /// Allocating variant of [`build_data_frame_into`].
-    pub fn build_data_frame(
-        frame_type: CanFrameType,
-        id: impl Into<u32>,
-        data: &[u8],
-    ) -> Result<Vec<u8>, &'static str> {
+    pub fn build_data_frame(id: Id, data: &[u8]) -> Result<Vec<u8>, &'static str> {
         let mut out = [0u8; DATA_FRAME_MAX_SIZE];
-        let len = Self::build_data_frame_into(frame_type, id.into(), data, &mut out)?;
+        let len = Self::build_data_frame_into(id, data, &mut out)?;
         Ok(out[..len].to_vec())
     }
 
@@ -380,7 +380,7 @@ impl Protocol for WaveshareUsbCanA {
         let frame = Self::build_settings_frame(
             config.can_speed as u8,
             config.can_mode as u8,
-            config.frame_type as u8,
+            config.extended_ids,
             config.filter_id,
             config.mask_id,
         );
@@ -390,9 +390,7 @@ impl Protocol for WaveshareUsbCanA {
 
     fn build_data_frame(
         &self,
-        frame_type: CanFrameType,
-        id: u32,
-        data: &[u8],
+        frame: &impl Frame,
         out: &mut [u8],
     ) -> Result<usize, &'static str> {
         if out.len() < DATA_FRAME_MAX_SIZE {
@@ -400,7 +398,7 @@ impl Protocol for WaveshareUsbCanA {
         }
         let out: &mut [u8; DATA_FRAME_MAX_SIZE] =
             (&mut out[..DATA_FRAME_MAX_SIZE]).try_into().unwrap();
-        Self::build_data_frame_into(frame_type, id, data, out)
+        Self::build_data_frame_into(frame.id(), frame.data(), out)
     }
 
     fn parse_next_frame(

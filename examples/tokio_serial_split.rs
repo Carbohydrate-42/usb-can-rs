@@ -1,7 +1,7 @@
 use tokio_serial::SerialPortBuilderExt;
 use usb_can::frontend::tokio_serial::split;
 use usb_can::protocol::wareshare_usb_can_a;
-use usb_can::{CanFrameType, CanMessage, Frame, StandardId};
+use usb_can::{CanMessage, Frame, StandardId};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,7 +16,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = wareshare_usb_can_a::Config {
         can_speed: wareshare_usb_can_a::CanSpeed::Bps1000000,
-        frame_type: CanFrameType::Standard,
         // filter_id: 0x100,
         // mask_id: 0x7F0,
         ..Default::default()

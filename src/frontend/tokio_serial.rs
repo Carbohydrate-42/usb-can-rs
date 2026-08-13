@@ -11,7 +11,6 @@
 use crate::logging::{error, info, trace, Fmt, Hex};
 use crate::message::CanMessage;
 use crate::protocol::{ParsedFrame, Protocol};
-use crate::types::CanFrameType;
 use embedded_can::{ExtendedId, Frame, Id, StandardId};
 use std::sync::Arc;
 use std::time::Duration;
@@ -289,12 +288,7 @@ async fn split_background_task<P>(
         while let Some(msg) = frame_rx.recv().await {
             // Build the wire data frame
             let mut buf = [0u8; 64];
-            let len = match protocol_write.build_data_frame(
-                CanFrameType::from(msg.id()),
-                CanMessage::raw_id(msg.id()),
-                msg.data(),
-                &mut buf,
-            ) {
+            let len = match protocol_write.build_data_frame(&msg, &mut buf) {
                 Ok(n) => n,
                 Err(_) => {
                     error!("Frame too large, dropping");
@@ -397,12 +391,7 @@ impl<P: Protocol> CanUsbClient<P> {
         let mut buf = [0u8; 64];
         let len = self
             .protocol
-            .build_data_frame(
-                CanFrameType::from(frame.id()),
-                CanMessage::raw_id(frame.id()),
-                frame.data(),
-                &mut buf,
-            )
+            .build_data_frame(frame, &mut buf)
             .map_err(ClientError::Protocol)?;
 
         if self.debug_traffic {

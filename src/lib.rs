@@ -23,7 +23,6 @@ mod logging;
 
 pub mod message;
 pub mod protocol;
-pub mod types;
 
 pub mod frontend;
 
@@ -33,4 +32,3 @@ pub use embedded_can::{ExtendedId, Frame, Id, StandardId};
 // Re-export our modules
 pub use message::CanMessage;
 pub use protocol::{ParsedFrame, ParsedFrameMeta, Protocol};
-pub use types::CanFrameType;

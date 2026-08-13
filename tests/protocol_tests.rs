@@ -2,11 +2,11 @@
 
 use usb_can::protocol::wareshare_usb_can_a::WaveshareUsbCanA;
 use usb_can::protocol::{ParsedFrame, Protocol};
-use usb_can::CanFrameType;
+use usb_can::{ExtendedId, Id, StandardId};
 
 #[test]
 fn test_build_settings_frame() {
-    let frame = WaveshareUsbCanA::build_settings_frame(0x01, 0x00, 0x01, 0x123, 0x7FF);
+    let frame = WaveshareUsbCanA::build_settings_frame(0x01, 0x00, false, 0x123, 0x7FF);
 
     assert_eq!(frame[0], 0xAA); // Start
     assert_eq!(frame[1], 0x55); // Command marker
@@ -29,7 +29,11 @@ fn test_build_settings_frame() {
 
 #[test]
 fn test_build_data_frame_standard() {
-    let data = WaveshareUsbCanA::build_data_frame(CanFrameType::Standard, 0x123u32, &[0x11, 0x22]).unwrap();
+    let data = WaveshareUsbCanA::build_data_frame(
+        Id::Standard(StandardId::new(0x123).unwrap()),
+        &[0x11, 0x22],
+    )
+    .unwrap();
 
     assert_eq!(data[0], 0xAA); // Start
     assert_eq!(data[1], 0xC2); // 0xC0 | DLC=2
@@ -42,7 +46,11 @@ fn test_build_data_frame_standard() {
 
 #[test]
 fn test_build_data_frame_extended() {
-    let data = WaveshareUsbCanA::build_data_frame(CanFrameType::Extended, 0x12345u32, &[0xAA]).unwrap();
+    let data = WaveshareUsbCanA::build_data_frame(
+        Id::Extended(ExtendedId::new(0x12345).unwrap()),
+        &[0xAA],
+    )
+    .unwrap();
 
     assert_eq!(data[0], 0xAA); // Start
     assert_eq!(data[1], 0xE1); // 0xC0 | 0x20 (extended) | DLC=1
@@ -51,7 +59,10 @@ fn test_build_data_frame_extended() {
 
 #[test]
 fn test_build_data_frame_too_long() {
-    let result = WaveshareUsbCanA::build_data_frame(CanFrameType::Standard, 0x123u32, &[0u8; 9]);
+    let result = WaveshareUsbCanA::build_data_frame(
+        Id::Standard(StandardId::new(0x123).unwrap()),
+        &[0u8; 9],
+    );
     assert!(result.is_err());
 }
 

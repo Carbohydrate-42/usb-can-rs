@@ -4,7 +4,6 @@
 use tokio_serial::SerialPortBuilderExt;
 use usb_can::frontend::zencan::split_for_zencan;
 use usb_can::protocol::wareshare_usb_can_a;
-use usb_can::CanFrameType;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
 use zencan_common::{CanId, CanMessage};
 
@@ -21,7 +20,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = wareshare_usb_can_a::Config {
         can_speed: wareshare_usb_can_a::CanSpeed::Bps1000000,
-        frame_type: CanFrameType::Standard,
         ..Default::default()
     };
 

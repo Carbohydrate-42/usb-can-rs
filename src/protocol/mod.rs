@@ -1,7 +1,7 @@
 pub mod wareshare_usb_can_a;
 
-use crate::types::CanFrameType;
 use alloc::vec::Vec;
+use embedded_can::Frame;
 
 /// A parsed CAN frame from the wire
 #[derive(Debug, Clone)]
@@ -49,11 +49,13 @@ pub trait Protocol {
         out: &mut [u8],
     ) -> Result<usize, &'static str>;
 
+    /// Build the wire data frame for `frame` into `out`.
+    ///
+    /// The standard/extended distinction is derived from the frame's
+    /// [`embedded_can::Id`]. Returns the number of bytes written.
     fn build_data_frame(
         &self,
-        frame_type: CanFrameType,
-        id: u32,
-        data: &[u8],
+        frame: &impl Frame,
         out: &mut [u8],
     ) -> Result<usize, &'static str>;
     

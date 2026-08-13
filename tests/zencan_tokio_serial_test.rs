@@ -1,6 +1,6 @@
-//! Tests for the zencan frontend message conversions.
+//! Tests for the zencan adapter message conversions.
 
-use usb_can::frontend::zencan_tokio_serial::{ZenCanReceiver, ZenCanSender};
+use usb_can::interfaces::zencan_tokio_serial::{ZenCanReceiver, ZenCanSender};
 use usb_can::{ExtendedId, Frame, Id, StandardId};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 

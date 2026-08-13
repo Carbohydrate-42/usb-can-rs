@@ -1,7 +1,7 @@
-//! zencan frontend over the tokio-serial transport: provides
+//! zencan adapter over the tokio-serial transport: provides
 //! `BusManager`-compatible sender/receiver.
 //!
-//! Wraps the split mode of [`crate::frontend::tokio_serial`], converting
+//! Wraps the split mode of [`crate::adapters::tokio_serial`], converting
 //! between `embedded-can` based frames and `zencan-common`'s message types,
 //! and implements zencan's `AsyncCanSender` / `AsyncCanReceiver` traits.
 
@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender, CanSendError};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 
-use crate::frontend::tokio_serial::{CanUsbSender, ClientError};
+use crate::adapters::tokio_serial::{CanUsbSender, ClientError};
 use crate::message::CanMessage;
 use crate::protocol::Protocol;
 use embedded_can::{ExtendedId, Frame, Id, StandardId};

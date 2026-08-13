@@ -1,5 +1,5 @@
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontend::tokio_serial::CanUsbSender;
+use usb_can::adapters::tokio_serial::CanUsbSender;
 use usb_can::protocol::wareshare_usb_can_a;
 use usb_can::{CanMessage, Frame, StandardId};
 

@@ -1,8 +1,8 @@
-//! Demo of the `zencan` frontend: split the adapter into a sender/receiver
+//! Demo of the `zencan` adapter: split the adapter into a sender/receiver
 //! pair that can be handed to zencan's `BusManager`.
 
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontend::zencan_tokio_serial::ZenCanSender;
+use usb_can::interfaces::zencan_tokio_serial::ZenCanSender;
 use usb_can::protocol::wareshare_usb_can_a;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
 use zencan_common::{CanId, CanMessage};

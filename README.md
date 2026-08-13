@@ -17,11 +17,12 @@ is one implementation of it.
   - `protocol::Protocol`: the trait (settings frame, data frame build/parse)
   - `protocol::wareshare_usb_can_a::WaveshareUsbCanA`: USB-CAN-A
     implementation + its config (`Config`, `CanSpeed`, `CanMode`)
-- `frontend` — transports/adaptors that move frames to/from the adapter:
-  - `frontend::tokio_serial` (feature `tokio-serial`, std): async serial port
+- `adapters` — device backends that move frames to/from the adapter:
+  - `adapters::tokio_serial` (feature `tokio-serial`, std): async serial port
     transport over a caller-opened `SerialStream` (`CanUsbSender::split`,
     `CanUsbClient`)
-  - `frontend::zencan_tokio_serial` (feature `zencan`): adaptor for zencan's
+- `interfaces` — adaptors exposing foreign CAN ecosystem interfaces:
+  - `interfaces::zencan_tokio_serial` (feature `zencan`): adaptor for zencan's
     `BusManager` (`ZenCanSender::split`, `ZenCanSender`, `ZenCanReceiver`)
 
 # Features
@@ -37,7 +38,7 @@ is one implementation of it.
 # std + tokio-serial transport
 usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-rs", features = ["tokio-serial", "log"] }
 
-# zencan frontend
+# zencan adapter
 usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-rs", features = ["zencan", "log"] }
 ```
 
@@ -46,7 +47,7 @@ use usb_can::protocol::wareshare_usb_can_a::{Config, WaveshareUsbCanA};
 
 // The serial port is opened by the caller; protocol is chosen explicitly
 let serial = tokio_serial::new("COM4", 2_000_000).open_native_async()?;
-let (tx, rx) = usb_can::frontend::tokio_serial::CanUsbSender::split(
+let (tx, rx) = usb_can::adapters::tokio_serial::CanUsbSender::split(
     serial, WaveshareUsbCanA, &Config::default(), false,
 ).await?;
 ```

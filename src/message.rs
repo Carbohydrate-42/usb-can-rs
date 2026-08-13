@@ -3,7 +3,7 @@
 //! `embedded-can` only defines traits (`Frame`, `Id`, ...), so this crate
 //! provides exactly one owned frame type, used for received messages.
 //! Anything implementing [`embedded_can::Frame`] can be sent through the
-//! frontends.
+//! adapters.
 
 use embedded_can::{ExtendedId, Frame, Id, StandardId};
 

@@ -1,4 +1,4 @@
-//! std frontend: tokio-serial transport.
+//! std adapter: tokio-serial transport.
 //!
 //! Async CAN adapter client over a serial port, in two flavors:
 //!

@@ -40,11 +40,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "signal"] }
 env_logger = "0.11"
 
 [[example]]
-name = "client"
+name = "tokio_serial_client"
 required-features = ["tokio-serial", "log"]
 
 [[example]]
-name = "split"
+name = "tokio_serial_split"
 required-features = ["tokio-serial", "log"]
 
 [[example]]

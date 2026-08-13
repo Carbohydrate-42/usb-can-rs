@@ -3,8 +3,12 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
+use embedded_can::StandardId;
 use usb_can::backends::embedded_io::{AsyncCanUsbClient, CanUsbClient};
-use usb_can::{CanSpeed, Frame, StandardId, WaveshareUsbCanA, WaveshareUsbCanAConfig};
+use usb_can::Frame;
+use usb_can::protocol::wareshare_usb_can_a::{
+    CanSpeed, Config, WaveshareUsbCanA,
+};
 
 /// In-memory loopback stream: written bytes can be read back.
 #[derive(Default)]
@@ -78,27 +82,44 @@ fn block_on<F: core::future::Future>(fut: F) -> F::Output {
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
-    let config = WaveshareUsbCanAConfig {
+    let config = Config {
         can_speed: CanSpeed::Bps500000,
         ..Default::default()
     };
 
     // --- Sync client ---
     // The mock loops bytes back, so anything we write can be read again.
-    let mut client = CanUsbClient::new(LoopbackIo::default(), WaveshareUsbCanA, config.clone(), false).unwrap();
+    let mut client = CanUsbClient::new(
+        LoopbackIo::default(),
+        WaveshareUsbCanA,
+        config.clone(),
+        false,
+    )
+    .unwrap();
     client.io_mut().buffer.clear(); // drop the looped-back settings frame
 
     let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11, 0x22]);
     client.write_frame(&frame).unwrap();
     let msg = client.read().unwrap();
-    println!("sync read back: id=0x{:03x} data={:02x?}", msg.raw_id(), msg.data());
+    println!(
+        "sync read back: id=0x{:03x} data={:02x?}",
+        msg.raw_id(),
+        msg.data()
+    );
 
     // --- Async client (same shape, async traits) ---
     block_on(async {
-        let mut client = AsyncCanUsbClient::new(LoopbackIo::default(), WaveshareUsbCanA, config, false).await.unwrap();
+        let mut client =
+            AsyncCanUsbClient::new(LoopbackIo::default(), WaveshareUsbCanA, config, false)
+                .await
+                .unwrap();
         client.io_mut().buffer.clear();
         client.write_frame(&frame).await.unwrap();
         let msg = client.read().await.unwrap();
-        println!("async read back: id=0x{:03x} data={:02x?}", msg.raw_id(), msg.data());
+        println!(
+            "async read back: id=0x{:03x} data={:02x?}",
+            msg.raw_id(),
+            msg.data()
+        );
     });
 }

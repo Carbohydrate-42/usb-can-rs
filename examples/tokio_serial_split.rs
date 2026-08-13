@@ -1,12 +1,7 @@
-//! Demo of the `zencan` frontend: split the adapter into a sender/receiver
-//! pair that can be handed to zencan's `BusManager`.
-
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontends::zencan::split_for_zencan;
+use usb_can::backends::tokio_serial::split;
 use usb_can::protocol::wareshare_usb_can_a;
-use usb_can::CanFrameType;
-use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
-use zencan_common::{CanId, CanMessage};
+use usb_can::{CanFrameType, Frame, StandardId};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,11 +17,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = wareshare_usb_can_a::Config {
         can_speed: wareshare_usb_can_a::CanSpeed::Bps1000000,
         frame_type: CanFrameType::Standard,
+        // filter_id: 0x100,
+        // mask_id: 0x7F0,
         ..Default::default()
     };
 
-    // (sender, receiver) compatible with zencan's BusManager::new
-    let (mut tx, mut rx) = split_for_zencan(
+    // Returns (sender, receiver) - same style as mpsc::channel!
+    let (tx, mut rx) = split(
         serial,
         wareshare_usb_can_a::WaveshareUsbCanA,
         &config,
@@ -34,12 +31,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // Send via the zencan AsyncCanSender trait
-    let msg = CanMessage::new(CanId::Std(0x123), &[0x11, 0x22]);
-    tx.send(msg).await?;
+    // tx is Clone-able, supporting multiple producers
+    let tx2 = tx.clone();
 
-    // Receive via the zencan AsyncCanReceiver trait
-    while let Ok(msg) = rx.recv().await {
+    // Producer task 1
+    tokio::spawn(async move {
+        let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11]);
+        tx.send(frame).await.unwrap();
+    });
+
+    // Producer task 2
+    tokio::spawn(async move {
+        let frame = Frame::standard(StandardId::new(0x456).unwrap(), &[0x22]);
+        tx2.send(frame).await.unwrap();
+    });
+
+    // Consumer
+    while let Some(msg) = rx.recv().await {
         println!("Received: {:?}", msg);
     }
 

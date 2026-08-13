@@ -15,7 +15,7 @@ implementation of it.
 - `protocol` — wire protocol abstraction:
   - `protocol::Protocol`: the trait (settings frame, data frame build/parse)
   - `protocol::usb_can::UsbCanA`: USB-CAN-A implementation + its config
-    (`WaveshareUsbCanAConfig`, `CanSpeed`, `CanMode`)
+    (`Config`, `CanSpeed`, `CanMode`)
 - `backends` — transports that move bytes to/from the adapter:
   - `backends::tokio_serial` (feature `tokio-serial`, std): async serial port
     transport over a caller-opened `SerialStream` (`split`, `client`, ...)

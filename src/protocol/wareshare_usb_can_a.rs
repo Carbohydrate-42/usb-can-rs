@@ -3,7 +3,6 @@
 #[allow(unused_imports)]
 use crate::logging::{debug, Hex};
 use crate::protocol::{ParsedFrameMeta, Protocol};
-use alloc::vec::Vec;
 use embedded_can::{Frame, Id};
 
 /// USB-CAN command frame size
@@ -260,19 +259,10 @@ impl WaveshareUsbCanA {
         Ok(5 + data.len())
     }
 
-    /// Build a data frame for transmission
-    ///
-    /// Allocating variant of [`build_data_frame_into`].
-    pub fn build_data_frame(id: Id, data: &[u8]) -> Result<Vec<u8>, &'static str> {
-        let mut out = [0u8; DATA_FRAME_MAX_SIZE];
-        let len = Self::build_data_frame_into(id, data, &mut out)?;
-        Ok(out[..len].to_vec())
-    }
-
     /// Generate checksum for command frames
     ///
     /// Sum of bytes from offset to offset+length, masked to 8 bits
-    pub fn generate_checksum(data: &[u8], offset: usize, length: usize) -> u8 {
+    fn generate_checksum(data: &[u8], offset: usize, length: usize) -> u8 {
         let sum: usize = data[offset..offset + length]
             .iter()
             .map(|&b| b as usize)
@@ -290,10 +280,7 @@ impl WaveshareUsbCanA {
     /// - `frame` is `Some(meta)` when a complete frame was parsed; its data
     ///   (0-8 bytes) is copied into `data_out`. Frames with DLC > 8 are treated
     ///   as junk.
-    pub fn parse_next_frame(
-        buffer: &[u8],
-        data_out: &mut [u8; 8]
-    ) -> (usize, Option<ParsedFrameMeta>) {
+    pub fn parse_next_frame(buffer: &[u8], data_out: &mut [u8; 8]) -> (usize, Option<ParsedFrameMeta>) {
         let mut offset = 0;
 
         while buffer.len() - offset >= 6 {
@@ -388,11 +375,7 @@ impl Protocol for WaveshareUsbCanA {
         Ok(CMD_FRAME_SIZE)
     }
 
-    fn build_data_frame(
-        &self,
-        frame: &impl Frame,
-        out: &mut [u8],
-    ) -> Result<usize, &'static str> {
+    fn build_data_frame(&self, frame: &impl Frame, out: &mut [u8]) -> Result<usize, &'static str> {
         if out.len() < DATA_FRAME_MAX_SIZE {
             return Err("Output buffer too small for data frame");
         }

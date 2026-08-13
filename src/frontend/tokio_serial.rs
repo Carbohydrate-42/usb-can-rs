@@ -10,7 +10,7 @@
 #[allow(unused_imports)]
 use crate::logging::{error, info, trace, Fmt, Hex};
 use crate::message::CanMessage;
-use crate::protocol::{ParsedFrame, Protocol};
+use crate::protocol::{ParsedFrameMeta, Protocol};
 use embedded_can::{ExtendedId, Frame, Id, StandardId};
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,13 +81,13 @@ impl From<mpsc::error::SendError<CanMessage>> for ClientError {
 }
 
 /// Convert a parsed wire frame into a [`CanMessage`].
-fn parsed_to_message(parsed: &ParsedFrame) -> Option<CanMessage> {
-    let can_id = if parsed.is_extended {
-        Id::Extended(ExtendedId::new(parsed.id as u32)?)
+fn parsed_to_message(meta: &ParsedFrameMeta, data: &[u8; 8]) -> Option<CanMessage> {
+    let can_id = if meta.is_extended {
+        Id::Extended(ExtendedId::new(meta.id as u32)?)
     } else {
-        Id::Standard(StandardId::new(parsed.id)?)
+        Id::Standard(StandardId::new(meta.id)?)
     };
-    CanMessage::new(can_id, &parsed.data)
+    CanMessage::new(can_id, &data[..meta.dlc as usize])
 }
 
 /// Copy any [`embedded_can::Frame`] into an owned [`CanMessage`].
@@ -253,21 +253,17 @@ async fn split_background_task<P>(
                 .copy_from_slice(&temp[..bytes_read]);
             rx_length += bytes_read;
 
-            // Parse frames
-            let mut parsed_frames = Vec::new();
-            let consumed = protocol_read.parse_frames(
-                &rx_buffer[..rx_length],
-                &mut parsed_frames
-            );
+            // Parse and forward frames one at a time
+            let mut data_out = [0u8; 8];
+            let mut consumed = 0;
+            loop {
+                let (used, meta) =
+                    protocol_read.parse_next_frame(&rx_buffer[consumed..rx_length], &mut data_out);
+                consumed += used;
 
-            if consumed > 0 {
-                rx_buffer.copy_within(consumed..rx_length, 0);
-                rx_length -= consumed;
-            }
+                let Some(meta) = meta else { break };
 
-            // Forward messages
-            for parsed in parsed_frames {
-                let msg = match parsed_to_message(&parsed) {
+                let msg = match parsed_to_message(&meta, &data_out) {
                     Some(m) => m,
                     None => {
                         error!("Invalid parsed frame (bad id or dlc > 8), dropping");
@@ -279,6 +275,11 @@ async fn split_background_task<P>(
                     error!("Message channel closed, read task exiting");
                     return;
                 }
+            }
+
+            if consumed > 0 {
+                rx_buffer.copy_within(consumed..rx_length, 0);
+                rx_length -= consumed;
             }
         }
     });
@@ -407,23 +408,23 @@ impl<P: Protocol> CanUsbClient<P> {
         let deadline = tokio::time::Instant::now() + timeout_duration;
 
         loop {
-            // Try parsing the buffer first
-            let mut parsed_frames = Vec::new();
-            let consumed = self.protocol.parse_frames(
-                &self.rx_buffer[..self.rx_length],
-                &mut parsed_frames,
-            );
+            // Try parsing one frame from the buffer first
+            let mut data_out = [0u8; 8];
+            let (consumed, meta) = self
+                .protocol
+                .parse_next_frame(&self.rx_buffer[..self.rx_length], &mut data_out);
 
             if consumed > 0 {
                 self.rx_buffer.copy_within(consumed..self.rx_length, 0);
                 self.rx_length -= consumed;
             }
 
-            if let Some(parsed) = parsed_frames.into_iter().next() {
-                if let Some(msg) = parsed_to_message(&parsed) {
+            if let Some(meta) = meta {
+                if let Some(msg) = parsed_to_message(&meta, &data_out) {
                     return Ok(msg);
                 }
                 error!("Invalid parsed frame (bad id or dlc > 8), dropping");
+                continue;
             }
 
             let now = tokio::time::Instant::now();
@@ -458,24 +459,27 @@ impl<P: Protocol> CanUsbClient<P> {
     }
 
     pub fn try_read(&mut self) -> Result<Option<CanMessage>, ClientError> {
-        let mut parsed_frames = Vec::new();
-        let consumed = self.protocol.parse_frames(
-            &self.rx_buffer[..self.rx_length],
-            &mut parsed_frames,
-        );
+        loop {
+            let mut data_out = [0u8; 8];
+            let (consumed, meta) = self
+                .protocol
+                .parse_next_frame(&self.rx_buffer[..self.rx_length], &mut data_out);
 
-        if consumed > 0 {
-            self.rx_buffer.copy_within(consumed..self.rx_length, 0);
-            self.rx_length -= consumed;
-        }
-
-        for parsed in parsed_frames {
-            if let Some(msg) = parsed_to_message(&parsed) {
-                return Ok(Some(msg));
+            if consumed > 0 {
+                self.rx_buffer.copy_within(consumed..self.rx_length, 0);
+                self.rx_length -= consumed;
             }
-            error!("Invalid parsed frame (bad id or dlc > 8), dropping");
+
+            match meta {
+                Some(meta) => {
+                    if let Some(msg) = parsed_to_message(&meta, &data_out) {
+                        return Ok(Some(msg));
+                    }
+                    error!("Invalid parsed frame (bad id or dlc > 8), dropping");
+                }
+                None => return Ok(None),
+            }
         }
-        Ok(None)
     }
 }
 

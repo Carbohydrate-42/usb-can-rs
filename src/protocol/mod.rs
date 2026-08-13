@@ -1,20 +1,8 @@
 pub mod wareshare_usb_can_a;
 
-use alloc::vec::Vec;
 use embedded_can::Frame;
 
-/// A parsed CAN frame from the wire
-#[derive(Debug, Clone)]
-pub struct ParsedFrame {
-    /// Frame ID (11-bit or 29-bit)
-    pub id: u16,
-    /// Frame data (0-8 bytes)
-    pub data: Vec<u8>,
-    /// True if extended frame (29-bit ID)
-    pub is_extended: bool,
-}
-
-/// Metadata of a single parsed frame (no-alloc variant).
+/// Metadata of a single parsed frame.
 ///
 /// Frame data is copied into the caller-provided buffer by
 /// [`Protocol::parse_next_frame`].
@@ -59,35 +47,13 @@ pub trait Protocol {
         out: &mut [u8],
     ) -> Result<usize, &'static str>;
     
+    /// Scan `buffer` for the next complete frame.
+    ///
+    /// Returns `(consumed, frame)`; see the implementation for details.
+    /// Call in a loop to drain a buffer.
     fn parse_next_frame(
         &self,
         buffer: &[u8],
         data_out: &mut [u8; 8],
     ) -> (usize, Option<ParsedFrameMeta>);
-    
-    fn parse_frames(
-        &self,
-        buffer: &[u8],
-        output: &mut Vec<ParsedFrame>,
-    ) -> usize {
-        let mut total_consumed = 0;
-        let mut data_out = [0u8; 8];
-
-        loop {
-            let (consumed, frame) =
-                self.parse_next_frame(&buffer[total_consumed..], &mut data_out);
-            total_consumed += consumed;
-
-            match frame {
-                Some(meta) => output.push(ParsedFrame {
-                    id: meta.id,
-                    data: data_out[..meta.dlc as usize].to_vec(),
-                    is_extended: meta.is_extended,
-                }),
-                None => break,
-            }
-        }
-
-        total_consumed
-    }
 }

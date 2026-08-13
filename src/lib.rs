@@ -7,7 +7,7 @@
 //! I/O is organized in two layers:
 //!
 //! - [`backends`] — transports that move bytes to/from the adapter:
-//!   - `tokio-serial` (std): [`backends::tokio_serial`]
+//!   - `tokio-serial` (std): [`frontends::tokio_serial`]
 //!   - `embedded-io` (no_std, sync + async): [`backends::embedded_io`]
 //! - [`frontends`] — adaptors exposing foreign interfaces:
 //!   - `zencan` (extension): [`frontends::zencan`]
@@ -26,8 +26,7 @@ pub mod message;
 pub mod protocol;
 pub mod types;
 
-pub mod backends;
-pub mod frontends;
+pub mod frontend;
 
 // Re-export CAN types from embedded-can
 pub use embedded_can::{ExtendedId, Id, StandardId};

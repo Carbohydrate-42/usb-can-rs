@@ -1,6 +1,6 @@
 //! Tests for the zencan frontend message conversions.
 
-use usb_can::frontends::zencan::{message_from_zencan, message_to_zencan};
+use usb_can::frontend::zencan::{message_from_zencan, message_to_zencan};
 use usb_can::{ExtendedId, Id, StandardId};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 

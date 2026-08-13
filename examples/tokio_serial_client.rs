@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::backends::tokio_serial::client;
+use usb_can::frontend::tokio_serial::client;
 use usb_can::protocol::wareshare_usb_can_a;
 use usb_can::{CanFrameType, Frame, StandardId};
 #[tokio::main]

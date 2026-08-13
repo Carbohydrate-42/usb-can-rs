@@ -4,3 +4,5 @@
 
 #[cfg(feature = "zencan")]
 pub mod zencan;
+#[cfg(feature = "tokio-serial")]
+pub mod tokio_serial;

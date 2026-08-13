@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender, CanSendError};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 
-use crate::backends::tokio_serial::{split, CanUsbSender, ClientError};
+use crate::frontend::tokio_serial::{split, CanUsbSender, ClientError};
 use crate::message::CanMessage;
 use crate::protocol::Protocol;
 use embedded_can::{ExtendedId, Id, StandardId};
@@ -98,8 +98,9 @@ impl AsyncCanSender for ZenCanSender {
     type Error = ZenCanSendError;
 
     async fn send(&mut self, msg: ZenCanMessage) -> Result<(), Self::Error> {
-        let converted = message_from_zencan(&msg)
-            .ok_or_else(|| ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg.clone())))?;
+        let converted = message_from_zencan(&msg).ok_or_else(|| {
+            ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg.clone()))
+        })?;
 
         self.inner.send(converted.into()).await.map_err(|e| {
             // Send failed: return the error together with the original message
@@ -138,9 +139,11 @@ impl AsyncCanReceiver for ZenCanReceiver {
     }
 
     async fn recv(&mut self) -> Result<ZenCanMessage, Self::Error> {
-        self.inner.recv().await.map(|m| message_to_zencan(&m)).ok_or_else(|| {
-            ZenCanRecvError("Channel closed".to_string())
-        })
+        self.inner
+            .recv()
+            .await
+            .map(|m| message_to_zencan(&m))
+            .ok_or_else(|| ZenCanRecvError("Channel closed".to_string()))
     }
 
     fn flush(&mut self) {

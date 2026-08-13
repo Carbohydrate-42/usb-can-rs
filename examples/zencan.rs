@@ -2,11 +2,12 @@
 //! pair that can be handed to zencan's `BusManager`.
 
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontends::zencan::split_for_zencan;
+use usb_can::frontend::zencan::split_for_zencan;
 use usb_can::protocol::wareshare_usb_can_a;
 use usb_can::CanFrameType;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
 use zencan_common::{CanId, CanMessage};
+use usb_can::frontend::zencan;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

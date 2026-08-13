@@ -1,5 +1,5 @@
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontend::tokio_serial::split;
+use usb_can::frontend::tokio_serial::CanUsbSender;
 use usb_can::protocol::wareshare_usb_can_a;
 use usb_can::{CanMessage, Frame, StandardId};
 
@@ -22,11 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Returns (sender, receiver) - same style as mpsc::channel!
-    let (tx, mut rx) = split(
+    let (tx, mut rx) = CanUsbSender::split(
         serial,
         wareshare_usb_can_a::WaveshareUsbCanA,
         &config,
-        false,
     )
     .await?;
 

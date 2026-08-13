@@ -42,11 +42,11 @@ name = "tokio_serial_split"
 required-features = ["tokio-serial", "log"]
 
 [[example]]
-name = "zencan"
+name = "zencan_tokio_serial"
 required-features = ["zencan", "log"]
 
 [[test]]
-name = "zencan_tests"
+name = "zencan_tokio_serial_test"
 required-features = ["zencan"]
 
 [lib]

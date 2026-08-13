@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontend::tokio_serial::client;
+use usb_can::frontend::tokio_serial::CanUsbClient;
 use usb_can::protocol::wareshare_usb_can_a;
 use usb_can::{CanMessage, Frame, StandardId};
 #[tokio::main]
@@ -22,7 +22,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Exclusive client
-    let mut client = client(serial, wareshare_usb_can_a::WaveshareUsbCanA, config, false).await?;
+    let mut client =
+        CanUsbClient::new(serial, wareshare_usb_can_a::WaveshareUsbCanA, config).await?;
 
     // Request-response pattern
     let req = CanMessage::new(StandardId::new(0x123).unwrap(), &[0x01]).unwrap();

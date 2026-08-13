@@ -2,7 +2,7 @@
 //! pair that can be handed to zencan's `BusManager`.
 
 use tokio_serial::SerialPortBuilderExt;
-use usb_can::frontend::zencan::split_for_zencan;
+use usb_can::frontend::zencan_tokio_serial::ZenCanSender;
 use usb_can::protocol::wareshare_usb_can_a;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
 use zencan_common::{CanId, CanMessage};
@@ -24,13 +24,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // (sender, receiver) compatible with zencan's BusManager::new
-    let (mut tx, mut rx) = split_for_zencan(
-        serial,
-        wareshare_usb_can_a::WaveshareUsbCanA,
-        &config,
-        false,
-    )
-    .await?;
+    let (mut tx, mut rx) =
+        ZenCanSender::split(serial, wareshare_usb_can_a::WaveshareUsbCanA, &config).await?;
 
     // Send via the zencan AsyncCanSender trait
     let msg = CanMessage::new(CanId::Std(0x123), &[0x11, 0x22]);

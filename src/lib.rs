@@ -6,7 +6,7 @@
 //! I/O lives in [`frontend`]:
 //!
 //! - `tokio-serial` (std): [`frontend::tokio_serial`] — async serial transport
-//! - `zencan` (extension): [`frontend::zencan`] — zencan `BusManager` adaptor
+//! - `zencan` (extension): [`frontend::zencan_tokio_serial`] — zencan `BusManager` adaptor
 //!
 //! Logging backend is selectable via `log` or `defmt` features (mutually
 //! exclusive; `defmt` wins if both are set; neither = no logs).

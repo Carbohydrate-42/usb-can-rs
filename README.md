@@ -19,10 +19,10 @@ is one implementation of it.
     implementation + its config (`Config`, `CanSpeed`, `CanMode`)
 - `frontend` — transports/adaptors that move frames to/from the adapter:
   - `frontend::tokio_serial` (feature `tokio-serial`, std): async serial port
-    transport over a caller-opened `SerialStream` (`split`, `client`,
-    `CanUsbSender`, `CanUsbClient`)
-  - `frontend::zencan` (feature `zencan`): adaptor for zencan's
-    `BusManager` (`split_for_zencan`, `ZenCanSender`, `ZenCanReceiver`)
+    transport over a caller-opened `SerialStream` (`CanUsbSender::split`,
+    `CanUsbClient`)
+  - `frontend::zencan_tokio_serial` (feature `zencan`): adaptor for zencan's
+    `BusManager` (`ZenCanSender::split`, `ZenCanSender`, `ZenCanReceiver`)
 
 # Features
 
@@ -46,7 +46,7 @@ use usb_can::protocol::wareshare_usb_can_a::{Config, WaveshareUsbCanA};
 
 // The serial port is opened by the caller; protocol is chosen explicitly
 let serial = tokio_serial::new("COM4", 2_000_000).open_native_async()?;
-let (tx, rx) = usb_can::frontend::tokio_serial::split(
+let (tx, rx) = usb_can::frontend::tokio_serial::CanUsbSender::split(
     serial, WaveshareUsbCanA, &Config::default(), false,
 ).await?;
 ```
@@ -57,5 +57,5 @@ let (tx, rx) = usb_can::frontend::tokio_serial::split(
 # Require a real adapter on COM4
 cargo run --example tokio_serial_client --features tokio-serial,log
 cargo run --example tokio_serial_split --features tokio-serial,log
-cargo run --example zencan --features zencan,log
+cargo run --example zencan_tokio_serial --features zencan,log
 ```

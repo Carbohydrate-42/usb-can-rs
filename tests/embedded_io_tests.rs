@@ -2,9 +2,9 @@
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
-use usb_can_a::backends::embedded_io::{AsyncCanUsbClient, CanUsbClient};
-use usb_can_a::protocol::usb_can_a::{build_data_frame, build_settings_frame};
-use usb_can_a::{CanSpeed, ExtendedId, Frame, Id, StandardId, UsbCanA, UsbCanAConfig};
+use usb_can::backends::embedded_io::{AsyncCanUsbClient, CanUsbClient};
+use usb_can::protocol::wareshare_usb_can_a::{build_data_frame, build_settings_frame};
+use usb_can::{CanSpeed, ExtendedId, Frame, Id, StandardId, WaveshareUsbCanA, WaveshareUsbCanAConfig};
 
 /// In-memory stream: `incoming` is what the adapter "sent" us,
 /// `written` collects everything the client writes out.
@@ -83,8 +83,8 @@ fn block_on<F: core::future::Future>(fut: F) -> F::Output {
     }
 }
 
-fn config() -> UsbCanAConfig {
-    UsbCanAConfig {
+fn config() -> WaveshareUsbCanAConfig {
+    WaveshareUsbCanAConfig {
         can_speed: CanSpeed::Bps500000,
         ..Default::default()
     }
@@ -103,13 +103,13 @@ fn expected_settings() -> [u8; 20] {
 
 #[test]
 fn test_sync_new_sends_settings() {
-    let client = CanUsbClient::new(MockIo::default(), UsbCanA, config(), false).unwrap();
+    let client = CanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).unwrap();
     assert_eq!(client.io().written, expected_settings());
 }
 
 #[test]
 fn test_sync_write_frame() {
-    let mut client = CanUsbClient::new(MockIo::default(), UsbCanA, config(), false).unwrap();
+    let mut client = CanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).unwrap();
     let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11, 0x22]);
     client.write_frame(&frame).unwrap();
 
@@ -120,11 +120,11 @@ fn test_sync_write_frame() {
 
 #[test]
 fn test_sync_poll_read_parses_frame() {
-    let mut client = CanUsbClient::new(MockIo::default(), UsbCanA, config(), false).unwrap();
+    let mut client = CanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).unwrap();
 
     // Feed a wire frame: standard ID 0x123, data [0xDE, 0xAD]
     let wire = build_data_frame(
-        usb_can_a::CanFrameType::Standard,
+        usb_can::CanFrameType::Standard,
         0x123u32,
         &[0xDE, 0xAD],
     )
@@ -138,10 +138,10 @@ fn test_sync_poll_read_parses_frame() {
 
 #[test]
 fn test_sync_read_extended_frame() {
-    let mut client = CanUsbClient::new(MockIo::default(), UsbCanA, config(), false).unwrap();
+    let mut client = CanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).unwrap();
 
     let wire = build_data_frame(
-        usb_can_a::CanFrameType::Extended,
+        usb_can::CanFrameType::Extended,
         0x1234u32,
         &[0xAA],
     )
@@ -155,10 +155,10 @@ fn test_sync_read_extended_frame() {
 
 #[test]
 fn test_sync_partial_frame_waits_for_more_data() {
-    let mut client = CanUsbClient::new(MockIo::default(), UsbCanA, config(), false).unwrap();
+    let mut client = CanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).unwrap();
 
     let wire = build_data_frame(
-        usb_can_a::CanFrameType::Standard,
+        usb_can::CanFrameType::Standard,
         0x7FFu32,
         &[0x01, 0x02, 0x03],
     )
@@ -177,10 +177,10 @@ fn test_sync_partial_frame_waits_for_more_data() {
 
 #[test]
 fn test_sync_skips_junk_bytes() {
-    let mut client = CanUsbClient::new(MockIo::default(), UsbCanA, config(), false).unwrap();
+    let mut client = CanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).unwrap();
 
     let wire = build_data_frame(
-        usb_can_a::CanFrameType::Standard,
+        usb_can::CanFrameType::Standard,
         0x100u32,
         &[0x42],
     )
@@ -196,11 +196,11 @@ fn test_sync_skips_junk_bytes() {
 #[test]
 fn test_async_client_roundtrip() {
     block_on(async {
-        let mut client = AsyncCanUsbClient::new(MockIo::default(), UsbCanA, config(), false).await.unwrap();
+        let mut client = AsyncCanUsbClient::new(MockIo::default(), WaveshareUsbCanA, config(), false).await.unwrap();
         assert_eq!(client.io().written, expected_settings());
 
         let wire = build_data_frame(
-            usb_can_a::CanFrameType::Standard,
+            usb_can::CanFrameType::Standard,
             0x321u32,
             &[0x55],
         )

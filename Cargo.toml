@@ -1,5 +1,5 @@
 [package]
-name = "usb-can-a-rs"
+name = "usb-can-rs"
 version = "0.3.0"
 edition = "2021"
 
@@ -64,5 +64,5 @@ name = "zencan_tests"
 required-features = ["zencan"]
 
 [lib]
-name = "usb_can_a"
+name = "usb_can"
 path = "src/lib.rs"

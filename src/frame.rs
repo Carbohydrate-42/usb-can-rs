@@ -35,7 +35,7 @@ impl Frame {
     ///
     /// # Example
     /// ```
-    /// use usb_can_a::{Frame, StandardId};
+    /// use usb_can::{Frame, StandardId};
     ///
     /// let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11, 0x22, 0x33, 0x44]);
     /// ```
@@ -74,7 +74,7 @@ impl Frame {
     ///
     /// # Example
     /// ```
-    /// use usb_can_a::Frame;
+    /// use usb_can::Frame;
     ///
     /// let frame = Frame::from_hex("123", "DEADBEEF").unwrap();
     /// ```

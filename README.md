@@ -1,4 +1,4 @@
-# USB-CAN-A Rust Library
+# USB-CAN Rust Library
 
 A Rust library for USB-CAN adapter communication.
 
@@ -7,15 +7,15 @@ Core is `no_std` compatible. CAN message types are based on
 `Frame` trait), with this crate's own `CanMessage` implementing it.
 
 The wire protocol is abstracted behind the `protocol::Protocol` trait — the
-USB-CAN-A binary protocol (`protocol::usb_can_a::UsbCanA`) is just one
+USB-CAN-A binary protocol (`protocol::usb_can::UsbCanA`) is just one
 implementation of it.
 
 # Layout
 
 - `protocol` — wire protocol abstraction:
   - `protocol::Protocol`: the trait (settings frame, data frame build/parse)
-  - `protocol::usb_can_a::UsbCanA`: USB-CAN-A implementation + its config
-    (`UsbCanAConfig`, `CanSpeed`, `CanMode`)
+  - `protocol::usb_can::UsbCanA`: USB-CAN-A implementation + its config
+    (`WaveshareUsbCanAConfig`, `CanSpeed`, `CanMode`)
 - `backends` — transports that move bytes to/from the adapter:
   - `backends::tokio_serial` (feature `tokio-serial`, std): async serial port
     transport over a caller-opened `SerialStream` (`split`, `client`, ...)
@@ -37,19 +37,19 @@ implementation of it.
 
 ```toml
 # std + tokio-serial backend
-usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-a-rs", features = ["tokio-serial", "log"] }
+usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-rs", features = ["tokio-serial", "log"] }
 
 # no_std + embedded-io backend
-usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-a-rs", default-features = false, features = ["embedded-io", "defmt"] }
+usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-rs", default-features = false, features = ["embedded-io", "defmt"] }
 
 # zencan frontend
-usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-a-rs", features = ["zencan", "log"] }
+usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-rs", features = ["zencan", "log"] }
 ```
 
 ```rust
 // The serial port is opened by the caller; protocol is chosen explicitly
 let serial = tokio_serial::new("COM4", 2_000_000).open_native_async()?;
-let (tx, rx) = usb_can_a::backends::tokio_serial::split(
+let (tx, rx) = usb_can::backends::tokio_serial::split(
     serial, UsbCanA, &UsbCanAConfig::default(), false,
 ).await?;
 ```

@@ -1,6 +1,6 @@
 use tokio_serial::SerialPortBuilderExt;
-use usb_can_a::backends::tokio_serial::split;
-use usb_can_a::{CanFrameType, CanSpeed, Frame, StandardId, UsbCanA, UsbCanAConfig};
+use usb_can::backends::tokio_serial::split;
+use usb_can::{CanFrameType, CanSpeed, Frame, StandardId, WaveshareUsbCanA, WaveshareUsbCanAConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,7 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.parity(tokio_serial::Parity::None)
 		.open_native_async()?;
 
-	let config = UsbCanAConfig {
+	let config = WaveshareUsbCanAConfig {
 		can_speed: CanSpeed::Bps1000000,
 		frame_type: CanFrameType::Standard,
 		// filter_id: 0x100,
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	};
 
 	// Returns (sender, receiver) - same style as mpsc::channel!
-	let (tx, mut rx) = split(serial, UsbCanA, &config, false).await?;
+	let (tx, mut rx) = split(serial, WaveshareUsbCanA, &config, false).await?;
 
 	// tx is Clone-able, supporting multiple producers
 	let tx2 = tx.clone();

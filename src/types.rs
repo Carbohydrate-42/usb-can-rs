@@ -2,7 +2,7 @@
 //!
 //! CAN message types come from [`embedded_can`] (see [`crate::message`]);
 //! protocol-specific configuration types live in their protocol
-//! implementation (e.g. [`crate::protocol::usb_can_a`]).
+//! implementation (e.g. [`crate::protocol::wareshare_usb_can_a`]).
 
 // Re-export embedded-can ID types for convenience
 pub use embedded_can::{ExtendedId, Id, StandardId};

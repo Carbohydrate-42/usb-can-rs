@@ -3,7 +3,7 @@
 //! The core is `no_std` compatible (requires `alloc` for the parsing
 //! convenience APIs). The wire protocol is abstracted behind
 //! [`protocol::Protocol`]; the USB-CAN-A binary protocol
-//! ([`protocol::usb_can_a::UsbCanA`]) is one implementation of it.
+//! ([`protocol::wareshare_usb_can_a::WaveshareUsbCanA`]) is one implementation of it.
 //! I/O is organized in two layers:
 //!
 //! - [`backends`] — transports that move bytes to/from the adapter:
@@ -35,6 +35,6 @@ pub use embedded_can::{ExtendedId, Id, StandardId};
 // Re-export our modules
 pub use frame::Frame;
 pub use message::CanMessage;
-pub use protocol::usb_can_a::{CanMode, CanSpeed, InvalidCanSpeed, UsbCanA, UsbCanAConfig};
+pub use protocol::wareshare_usb_can_a::{CanMode, CanSpeed, InvalidCanSpeed, WaveshareUsbCanA, WaveshareUsbCanAConfig};
 pub use protocol::{hex_to_bytes, parse_can_id, ParsedFrame, ParsedFrameMeta, Protocol};
 pub use types::{CanFrameType, PayloadMode};

@@ -1,8 +1,8 @@
 //! Protocol tests
 
-use usb_can_a::protocol::usb_can_a::{build_data_frame, build_settings_frame, UsbCanA};
-use usb_can_a::protocol::{ParsedFrame, Protocol};
-use usb_can_a::CanFrameType;
+use usb_can::protocol::wareshare_usb_can_a::{build_data_frame, build_settings_frame, WaveshareUsbCanA};
+use usb_can::protocol::{ParsedFrame, Protocol};
+use usb_can::CanFrameType;
 
 #[test]
 fn test_build_settings_frame() {
@@ -61,7 +61,7 @@ fn test_parse_single_frame() {
     let buffer = [0xAA, 0xC2, 0x23, 0x01, 0x11, 0x22, 0x55];
     let mut output: Vec<ParsedFrame> = Vec::new();
 
-    let consumed = UsbCanA.parse_frames(&buffer, &mut output, false);
+    let consumed = WaveshareUsbCanA.parse_frames(&buffer, &mut output, false);
 
     assert_eq!(consumed, 7);
     assert_eq!(output.len(), 1);
@@ -79,7 +79,7 @@ fn test_parse_multiple_frames() {
     ];
     let mut output: Vec<ParsedFrame> = Vec::new();
 
-    let consumed = UsbCanA.parse_frames(&buffer, &mut output, false);
+    let consumed = WaveshareUsbCanA.parse_frames(&buffer, &mut output, false);
 
     assert_eq!(consumed, 13);
     assert_eq!(output.len(), 2);
@@ -93,7 +93,7 @@ fn test_parse_extended_frame() {
     let buffer = [0xAA, 0xE2, 0x23, 0x01, 0x11, 0x22, 0x55];
     let mut output: Vec<ParsedFrame> = Vec::new();
 
-    UsbCanA.parse_frames(&buffer, &mut output, false);
+    WaveshareUsbCanA.parse_frames(&buffer, &mut output, false);
 
     assert_eq!(output.len(), 1);
     assert!(output[0].is_extended);
@@ -105,7 +105,7 @@ fn test_parse_incomplete_frame() {
     let buffer = [0xAA, 0xC2, 0x23, 0x01, 0x11, 0x22];
     let mut output: Vec<ParsedFrame> = Vec::new();
 
-    let consumed = UsbCanA.parse_frames(&buffer, &mut output, false);
+    let consumed = WaveshareUsbCanA.parse_frames(&buffer, &mut output, false);
 
     assert_eq!(consumed, 0); // Nothing consumed yet
     assert!(output.is_empty());
@@ -117,7 +117,7 @@ fn test_parse_with_junk_bytes() {
     let buffer = [0x00, 0xFF, 0xAA, 0xC1, 0x23, 0x01, 0xAA, 0x55];
     let mut output: Vec<ParsedFrame> = Vec::new();
 
-    let consumed = UsbCanA.parse_frames(&buffer, &mut output, false);
+    let consumed = WaveshareUsbCanA.parse_frames(&buffer, &mut output, false);
 
     assert_eq!(consumed, 8); // All bytes consumed
     assert_eq!(output.len(), 1);
@@ -133,7 +133,7 @@ fn test_parse_partial_consumption() {
     ];
     let mut output: Vec<ParsedFrame> = Vec::new();
 
-    let consumed = UsbCanA.parse_frames(&buffer, &mut output, false);
+    let consumed = WaveshareUsbCanA.parse_frames(&buffer, &mut output, false);
 
     assert_eq!(consumed, 7); // Only first frame consumed (7 bytes)
     assert_eq!(output.len(), 1);

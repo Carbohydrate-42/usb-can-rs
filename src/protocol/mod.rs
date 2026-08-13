@@ -2,12 +2,12 @@
 //!
 //! The [`Protocol`] trait abstracts how CAN messages are encoded to and
 //! decoded from the byte stream of an adapter. The USB-CAN-A binary protocol
-//! is just one implementation, see [`usb_can_a::UsbCanA`].
+//! is just one implementation, see [`wareshare_usb_can_a::WaveshareUsbCanA`].
 //!
 //! Backends ([`crate::backends`]) and frontends ([`crate::frontends`]) are
 //! generic over a `Protocol` implementation.
 
-pub mod usb_can_a;
+pub mod wareshare_usb_can_a;
 
 use crate::message::id_from_raw;
 use crate::types::CanFrameType;

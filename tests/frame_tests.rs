@@ -1,6 +1,6 @@
 //! Frame builder tests
 
-use usb_can_a::{ExtendedId, Frame, Id, StandardId};
+use usb_can::{ExtendedId, Frame, Id, StandardId};
 
 fn std_id(raw: u16) -> StandardId {
     StandardId::new(raw).unwrap()
@@ -78,7 +78,7 @@ fn test_frame_rtr() {
 
 #[test]
 fn test_frame_from_message() {
-    use usb_can_a::CanMessage;
+    use usb_can::CanMessage;
 
     let msg = CanMessage::new(std_id(0x200), &[0x01, 0x02, 0x03]).unwrap();
     let frame = Frame::from_message(msg.clone());
@@ -89,7 +89,7 @@ fn test_frame_from_message() {
 
 #[test]
 fn test_frame_conversions() {
-    use usb_can_a::CanMessage;
+    use usb_can::CanMessage;
 
     let frame = Frame::standard(std_id(0x300), &[0xAA, 0xBB]);
     let msg: CanMessage = frame.into();

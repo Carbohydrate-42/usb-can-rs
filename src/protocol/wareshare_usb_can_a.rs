@@ -124,7 +124,7 @@ pub enum CanMode {
 
 /// Configuration of the USB-CAN-A adapter.
 #[derive(Debug, Clone)]
-pub struct UsbCanAConfig {
+pub struct WaveshareUsbCanAConfig {
     /// CAN bus speed
     pub can_speed: CanSpeed,
     /// CAN operation mode
@@ -137,7 +137,7 @@ pub struct UsbCanAConfig {
     pub mask_id: u32,
 }
 
-impl Default for UsbCanAConfig {
+impl Default for WaveshareUsbCanAConfig {
     fn default() -> Self {
         Self {
             can_speed: CanSpeed::Bps500000,
@@ -155,10 +155,10 @@ impl Default for UsbCanAConfig {
 
 /// USB-CAN-A wire protocol.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct UsbCanA;
+pub struct WaveshareUsbCanA;
 
-impl Protocol for UsbCanA {
-    type Config = UsbCanAConfig;
+impl Protocol for WaveshareUsbCanA {
+    type Config = WaveshareUsbCanAConfig;
 
     const SETTINGS_FRAME_MAX_SIZE: usize = CMD_FRAME_SIZE;
     const DATA_FRAME_MAX_SIZE: usize = DATA_FRAME_MAX_SIZE;

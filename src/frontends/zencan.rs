@@ -154,7 +154,7 @@ impl AsyncCanReceiver for ZenCanReceiver {
 ///
 /// # Arguments
 /// * `serial` - serial port opened by the caller (e.g. via `open_native_async`)
-/// * `protocol` - wire protocol implementation (e.g. [`crate::UsbCanA`])
+/// * `protocol` - wire protocol implementation (e.g. [`crate::WaveshareUsbCanA`])
 /// * `config` - protocol-specific configuration
 /// * `debug_traffic` - log raw wire traffic
 pub async fn split_for_zencan<P>(

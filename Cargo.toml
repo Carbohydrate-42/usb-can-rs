@@ -47,6 +47,18 @@ required-features = ["tokio-serial", "log"]
 name = "split"
 required-features = ["tokio-serial", "log"]
 
+[[example]]
+name = "zencan"
+required-features = ["zencan", "log"]
+
+[[example]]
+name = "embedded_io_loopback"
+required-features = ["embedded-io", "log"]
+
+[[test]]
+name = "embedded_io_tests"
+required-features = ["embedded-io"]
+
 [lib]
 name = "usb_can_a"
 path = "src/lib.rs"

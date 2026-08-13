@@ -1,4 +1,4 @@
-//! std adapter: tokio-serial transport.
+//! std backend: tokio-serial transport.
 //!
 //! Async CAN USB client over a serial port, supporting both a channel-style
 //! split mode and an exclusive client mode.
@@ -122,42 +122,42 @@ fn parsed_to_message(parsed: &crate::protocol::ParsedFrame) -> Option<CanMessage
 }
 
 // ============================================
-// Split 模式：Channel 风格
+// Split mode: channel style
 // ============================================
 
-/// 发送端 Sender - 通过 channel 发送 Frame，后台任务实际写入串口
+/// Sender half - frames are queued into a channel, a background task writes them to the serial port
 #[derive(Clone)]
 pub struct CanUsbSender {
     frame_tx: mpsc::Sender<Frame>,
 }
 
 impl CanUsbSender {
-    /// 异步发送 CAN 帧（非阻塞，缓冲到 channel）
+    /// Send a CAN frame asynchronously (non-blocking, buffered into the channel)
     pub async fn send(&self, frame: Frame) -> Result<(), ClientError> {
         self.frame_tx.send(frame).await.map_err(Into::into)
     }
 
-    /// 尝试发送（非阻塞）
+    /// Try to send without waiting (non-blocking)
     pub fn try_send(&self, frame: Frame) -> Result<(), mpsc::error::TrySendError<Frame>> {
         self.frame_tx.try_send(frame)
     }
 
-    /// 检查 channel 是否关闭
+    /// Check whether the channel is closed
     pub fn is_closed(&self) -> bool {
         self.frame_tx.is_closed()
     }
 }
 
-/// 创建 Split 模式，返回 (sender, receiver)
+/// Create split mode, returning (sender, receiver)
 ///
-/// sender 可以 clone，支持多生产者并发发送
-/// receiver 是唯一的，用于接收 CAN 消息
+/// The sender can be cloned, supporting multiple concurrent producers.
+/// The receiver is unique and yields incoming CAN messages.
 pub async fn split(
     config: TokioSerialConfig,
 ) -> Result<(CanUsbSender, mpsc::Receiver<CanMessage>), ClientError> {
     info!("Creating Split mode: {} @ {} baud", Fmt(&config.device), config.baudrate);
 
-    // 打开串口
+    // Open the serial port
     let serial = tokio_serial::new(&config.device, config.baudrate)
         .data_bits(tokio_serial::DataBits::Eight)
         .stop_bits(tokio_serial::StopBits::Two)
@@ -166,12 +166,12 @@ pub async fn split(
 
     let serial = Arc::new(Mutex::new(serial));
 
-    // 创建 channel：发送 Frame 的 channel（用户 -> 后台写入任务）
+    // Channel carrying frames to send (user -> background write task)
     let (frame_tx, frame_rx) = mpsc::channel::<Frame>(100);
-    // 接收 CanMessage 的 channel（后台读取任务 -> 用户）
+    // Channel carrying received messages (background read task -> user)
     let (msg_tx, msg_rx) = mpsc::channel::<CanMessage>(100);
 
-    // 发送初始设置
+    // Send the initial settings frame
     {
         let settings = build_settings_frame(
             config.can.can_speed as u8,
@@ -187,7 +187,7 @@ pub async fn split(
     }
     info!("Settings sent successfully");
 
-    // 启动后台任务
+    // Spawn the background task
     tokio::spawn(split_background_task(
         serial,
         frame_rx,
@@ -200,18 +200,18 @@ pub async fn split(
     Ok((sender, msg_rx))
 }
 
-/// Split 模式的后台任务：分离的读取和写入任务
+/// Background task of split mode: separate read and write tasks
 ///
-/// 方案：启动两个任务，一个专门写，一个专门读
-/// 避免 Mutex 竞争，利用串口全双工特性
+/// Two tasks are spawned, one dedicated to writing and one to reading,
+/// avoiding Mutex contention and exploiting the full-duplex serial port.
 async fn split_background_task(
     serial: Arc<Mutex<tokio_serial::SerialStream>>,
     mut frame_rx: mpsc::Receiver<Frame>,
     msg_tx: mpsc::Sender<CanMessage>,
     config: TokioSerialConfig,
 ) {
-    // 创建内部 channel 用于两个任务间协调（如果需要）
-    // 但串口是全双工的，读写可以真正并行
+    // No coordination channel between the two tasks is needed:
+    // the serial port is full-duplex, so reads and writes run truly in parallel.
 
     let serial_read = serial.clone();
     let serial_write = serial;
@@ -219,18 +219,18 @@ async fn split_background_task(
     let config_read = config.clone();
     let config_write = config;
 
-    // 读取任务
+    // Read task
     let read_task = tokio::spawn(async move {
         let mut rx_buffer = vec![0u8; 1024];
         let mut rx_length: usize = 0;
         let mut temp = vec![0u8; 256];
 
         loop {
-            // 获取锁读取
+            // Acquire the lock and read
             let bytes_read = {
                 let mut port = match timeout(Duration::from_millis(100), serial_read.lock()).await {
                     Ok(p) => p,
-                    Err(_) => continue, // 获取锁超时，重试
+                    Err(_) => continue, // Lock acquisition timed out, retry
                 };
 
                 match timeout(Duration::from_millis(50), port.read(&mut temp)).await {
@@ -239,7 +239,7 @@ async fn split_background_task(
                         error!("Serial read error: {}", Fmt(&_e));
                         return;
                     }
-                    Err(_) => 0, // 读超时
+                    Err(_) => 0, // Read timeout
                 }
             };
 
@@ -252,7 +252,7 @@ async fn split_background_task(
                 trace!("RX raw: {:?}", Hex(&temp[..bytes_read]));
             }
 
-            // 复制到缓冲区
+            // Copy into the buffer
             if rx_length + bytes_read > rx_buffer.len() {
                 rx_length = 0;
             }
@@ -260,7 +260,7 @@ async fn split_background_task(
                 .copy_from_slice(&temp[..bytes_read]);
             rx_length += bytes_read;
 
-            // 解析帧
+            // Parse frames
             let mut parsed_frames = Vec::new();
             let consumed = parse_frames(
                 &rx_buffer[..rx_length],
@@ -273,7 +273,7 @@ async fn split_background_task(
                 rx_length -= consumed;
             }
 
-            // 发送消息
+            // Forward messages
             for parsed in parsed_frames {
                 let msg = match parsed_to_message(&parsed) {
                     Some(m) => m,
@@ -291,10 +291,10 @@ async fn split_background_task(
         }
     });
 
-    // 写入任务
+    // Write task
     let write_task = tokio::spawn(async move {
         while let Some(frame) = frame_rx.recv().await {
-            // 构建数据帧
+            // Build the wire data frame
             let data = match build_data_frame(
                 frame.frame_type,
                 frame.raw_id(),
@@ -307,7 +307,7 @@ async fn split_background_task(
                 }
             };
 
-            // 获取锁写入
+            // Acquire the lock and write
             let mut port = match timeout(Duration::from_secs(5), serial_write.lock()).await {
                 Ok(p) => p,
                 Err(_) => {
@@ -333,7 +333,7 @@ async fn split_background_task(
         info!("Frame channel closed, write task exiting");
     });
 
-    // 等待任一任务结束
+    // Wait until either task finishes
     tokio::select! {
         _ = read_task => error!("Read task exited"),
         _ = write_task => error!("Write task exited"),
@@ -343,10 +343,10 @@ async fn split_background_task(
 }
 
 // ============================================
-// Client 模式：独占式读写
+// Client mode: exclusive read/write
 // ============================================
 
-/// 独占式客户端，同时只能进行 read 或 write
+/// Exclusive client; only one of read or write can be in progress at a time
 pub struct CanUsbClient {
     serial: tokio_serial::SerialStream,
     config: TokioSerialConfig,
@@ -356,7 +356,7 @@ pub struct CanUsbClient {
 }
 
 impl CanUsbClient {
-    /// 创建新的 Client 模式（独占串口）
+    /// Create a new client (exclusive ownership of the serial port)
     pub async fn new(config: TokioSerialConfig) -> Result<Self, ClientError> {
         info!("Creating Client mode: {} @ {} baud", Fmt(&config.device), config.baudrate);
 
@@ -411,7 +411,7 @@ impl CanUsbClient {
         let deadline = tokio::time::Instant::now() + timeout_duration;
 
         loop {
-            // 先尝试解析缓冲区
+            // Try parsing the buffer first
             let mut parsed_frames = Vec::new();
             let consumed = parse_frames(&self.rx_buffer[..self.rx_length], &mut parsed_frames, false);
 
@@ -477,7 +477,7 @@ impl CanUsbClient {
     }
 }
 
-/// 便捷函数：直接创建 Client 模式
+/// Convenience function: create a client directly
 pub async fn client(config: TokioSerialConfig) -> Result<CanUsbClient, ClientError> {
     CanUsbClient::new(config).await
 }

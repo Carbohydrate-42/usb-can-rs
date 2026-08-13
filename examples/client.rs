@@ -1,5 +1,5 @@
 use std::time::Duration;
-use usb_can_a::tokio_serial::{client, TokioSerialConfig};
+use usb_can_a::backends::tokio_serial::{client, TokioSerialConfig};
 use usb_can_a::{CanFrameType, CanSpeed, CanUsbConfig, Frame, StandardId};
 
 #[tokio::main]
@@ -18,14 +18,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		},
 	};
 
-	// 独占式客户端
+	// Exclusive client
 	let mut client = client(config).await?;
 
-	// 请求-响应模式
+	// Request-response pattern
 	let req = Frame::standard(StandardId::new(0x123).unwrap(), &[0x01]);
 	client.write(&req).await?;
 
-	// 阻塞等待响应（独占读取）
+	// Block waiting for the response (exclusive read)
 	let resp = client.read(Duration::from_secs(1)).await?;
 	println!("Response: {:?}", resp);
 

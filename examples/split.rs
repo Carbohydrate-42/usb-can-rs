@@ -1,4 +1,4 @@
-use usb_can_a::tokio_serial::{split, TokioSerialConfig};
+use usb_can_a::backends::tokio_serial::{split, TokioSerialConfig};
 use usb_can_a::{CanFrameType, CanSpeed, CanUsbConfig, Frame, StandardId};
 
 #[tokio::main]
@@ -17,25 +17,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		},
 	};
 
-	// 返回 (sender, receiver) - 和 mpsc::channel 一样的风格！
+	// Returns (sender, receiver) - same style as mpsc::channel!
 	let (tx, mut rx) = split(config).await?;
 
-	// tx 可以 Clone，多生产者
+	// tx is Clone-able, supporting multiple producers
 	let tx2 = tx.clone();
 
-	// 生产者任务 1
+	// Producer task 1
 	tokio::spawn(async move {
 		let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11]);
 		tx.send(frame).await.unwrap();
 	});
 
-	// 生产者任务 2
+	// Producer task 2
 	tokio::spawn(async move {
 		let frame = Frame::standard(StandardId::new(0x456).unwrap(), &[0x22]);
 		tx2.send(frame).await.unwrap();
 	});
 
-	// 消费者
+	// Consumer
 	while let Some(msg) = rx.recv().await {
 		println!("Received: {:?}", msg);
 	}

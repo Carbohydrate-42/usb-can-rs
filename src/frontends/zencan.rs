@@ -1,4 +1,4 @@
-//! zencan adaptor: provides `BusManager`-compatible sender/receiver.
+//! zencan frontend: provides `BusManager`-compatible sender/receiver.
 //!
 //! Converts between this crate's `embedded-can` based [`CanMessage`] and
 //! `zencan-common`'s message types, and implements zencan's
@@ -9,10 +9,10 @@ use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender, CanSendError};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 
 use crate::message::CanMessage;
-use crate::tokio_serial::{split, CanUsbSender, ClientError, TokioSerialConfig};
+use crate::backends::tokio_serial::{split, CanUsbSender, ClientError, TokioSerialConfig};
 use embedded_can::{ExtendedId, Id, StandardId};
 
-/// Convert a zencan message into our `embedded-can` based message.
+/// Convert a zencan message into this crate's `embedded-can` based message.
 fn from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
     let id = match msg.id {
         CanId::Std(raw) => Id::Standard(StandardId::new(raw)?),
@@ -38,7 +38,7 @@ fn to_zencan(msg: &CanMessage) -> ZenCanMessage {
     }
 }
 
-/// 适配 zencan 的 AsyncCanSender
+/// Adapter implementing zencan's `AsyncCanSender`
 pub struct ZenCanSender {
     inner: CanUsbSender,
 }
@@ -49,7 +49,7 @@ impl ZenCanSender {
     }
 }
 
-/// 发送错误适配
+/// Send error adapter
 #[derive(Debug)]
 pub struct ZenCanSendError {
     msg: String,
@@ -68,10 +68,12 @@ impl core::fmt::Display for ZenCanSendError {
     }
 }
 
+impl std::error::Error for ZenCanSendError {}
+
 impl CanSendError for ZenCanSendError {
     fn into_can_message(self) -> ZenCanMessage {
         self.undelivered.unwrap_or_else(|| {
-            // 如果没有保存消息，创建一个空的作为占位
+            // If the original message was not kept, create an empty placeholder
             ZenCanMessage::new(CanId::Std(0), &[])
         })
     }
@@ -83,8 +85,8 @@ impl CanSendError for ZenCanSendError {
 
 impl From<ClientError> for ZenCanSendError {
     fn from(e: ClientError) -> Self {
-        // ClientError 不包含原始消息，所以 undelivered 为 None
-        // 如果需要保留消息，需要在 send 方法里手动构造
+        // ClientError does not carry the original message, so undelivered is None.
+        // To keep the message, construct the error manually in send().
         ZenCanSendError::new(e.to_string(), None)
     }
 }
@@ -97,13 +99,13 @@ impl AsyncCanSender for ZenCanSender {
             .ok_or_else(|| ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg.clone())))?;
 
         self.inner.send(converted.into()).await.map_err(|e| {
-            // 发送失败，返回错误并附带原始消息
+            // Send failed: return the error together with the original message
             ZenCanSendError::new(e.to_string(), Some(msg))
         })
     }
 }
 
-/// 适配 zencan 的 AsyncCanReceiver
+/// Adapter implementing zencan's `AsyncCanReceiver`
 pub struct ZenCanReceiver {
     inner: mpsc::Receiver<CanMessage>,
 }
@@ -123,6 +125,8 @@ impl core::fmt::Display for ZenCanRecvError {
     }
 }
 
+impl std::error::Error for ZenCanRecvError {}
+
 impl AsyncCanReceiver for ZenCanReceiver {
     type Error = ZenCanRecvError;
 
@@ -141,12 +145,75 @@ impl AsyncCanReceiver for ZenCanReceiver {
     }
 }
 
-/// 专为 zencan BusManager 创建的 split 函数
+/// Split function dedicated to zencan's BusManager
 ///
-/// 返回可以直接传给 BusManager::new 的 sender 和 receiver
+/// Returns a sender and receiver that can be passed directly to `BusManager::new`.
 pub async fn split_for_zencan(
     config: TokioSerialConfig,
 ) -> Result<(ZenCanSender, ZenCanReceiver), ClientError> {
     let (tx, rx) = split(config).await?;
     Ok((ZenCanSender::new(tx), ZenCanReceiver::new(rx)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_standard_message_roundtrip() {
+        let zen = ZenCanMessage::new(CanId::Std(0x123), &[0x11, 0x22, 0x33]);
+        let ours = from_zencan(&zen).unwrap();
+
+        assert_eq!(ours.id(), Id::Standard(StandardId::new(0x123).unwrap()));
+        assert_eq!(ours.data(), &[0x11, 0x22, 0x33]);
+        assert!(!ours.is_rtr());
+
+        let back = to_zencan(&ours);
+        assert_eq!(back.id, CanId::Std(0x123));
+        assert_eq!(back.data(), &[0x11, 0x22, 0x33]);
+        assert!(!back.rtr);
+    }
+
+    #[test]
+    fn test_extended_message_roundtrip() {
+        let zen = ZenCanMessage::new(CanId::Extended(0x1ABCDE), &[0xAA]);
+        let ours = from_zencan(&zen).unwrap();
+
+        assert_eq!(ours.id(), Id::Extended(ExtendedId::new(0x1ABCDE).unwrap()));
+        assert_eq!(ours.data(), &[0xAA]);
+
+        let back = to_zencan(&ours);
+        assert_eq!(back.id, CanId::Extended(0x1ABCDE));
+        assert_eq!(back.data(), &[0xAA]);
+    }
+
+    #[test]
+    fn test_rtr_message_roundtrip() {
+        let zen = ZenCanMessage::new_rtr(CanId::Std(0x100));
+        let ours = from_zencan(&zen).unwrap();
+
+        assert!(ours.is_rtr());
+        assert_eq!(ours.data(), &[]);
+
+        let back = to_zencan(&ours);
+        assert!(back.rtr);
+        assert_eq!(back.id, CanId::Std(0x100));
+    }
+
+    #[test]
+    fn test_invalid_standard_id_rejected() {
+        // 0x800 does not fit in 11 bits
+        let zen = ZenCanMessage::new(CanId::Std(0x800), &[]);
+        assert!(from_zencan(&zen).is_none());
+    }
+
+    #[test]
+    fn test_empty_data_roundtrip() {
+        let zen = ZenCanMessage::new(CanId::Std(0x1), &[]);
+        let ours = from_zencan(&zen).unwrap();
+        assert_eq!(ours.dlc(), 0);
+
+        let back = to_zencan(&ours);
+        assert_eq!(back.data(), &[]);
+    }
 }

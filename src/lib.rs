@@ -1,12 +1,13 @@
 //! USB-CAN-A adapter driver.
 //!
 //! Core protocol is `no_std` compatible (requires `alloc` for the parsing
-//! convenience APIs). Transports are provided as optional adapters:
+//! convenience APIs). I/O is organized in two layers:
 //!
-//! - `tokio-serial` (std): [`tokio_serial`] — async serial port transport
-//! - `embedded-io` (no_std): [`embedded_io`] — sync + async transport over
-//!   any `embedded-io` stream
-//! - `zencan` (extension): [`zencan`] — adaptor for zencan's `BusManager`
+//! - [`backends`] — transports that move bytes to/from the adapter:
+//!   - `tokio-serial` (std): [`backends::tokio_serial`]
+//!   - `embedded-io` (no_std, sync + async): [`backends::embedded_io`]
+//! - [`frontends`] — adaptors exposing foreign interfaces:
+//!   - `zencan` (extension): [`frontends::zencan`]
 //!
 //! Logging backend is selectable via `log` or `defmt` features (mutually
 //! exclusive; `defmt` wins if both are set; neither = no logs).
@@ -22,14 +23,8 @@ pub mod message;
 pub mod protocol;
 pub mod types;
 
-#[cfg(feature = "tokio-serial")]
-pub mod tokio_serial;
-
-#[cfg(feature = "embedded-io")]
-pub mod embedded_io;
-
-#[cfg(feature = "zencan")]
-pub mod zencan;
+pub mod backends;
+pub mod frontends;
 
 // Re-export CAN types from embedded-can
 pub use embedded_can::{ExtendedId, Id, StandardId};

@@ -1,7 +1,7 @@
 use tokio_serial::SerialPortBuilderExt;
 use usb_can::frontend::tokio_serial::split;
 use usb_can::protocol::wareshare_usb_can_a;
-use usb_can::{CanFrameType, Frame, StandardId};
+use usb_can::{CanFrameType, CanMessage, Frame, StandardId};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,14 +36,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Producer task 1
     tokio::spawn(async move {
-        let frame = Frame::standard(StandardId::new(0x123).unwrap(), &[0x11]);
-        tx.send(frame).await.unwrap();
+        let frame = CanMessage::new(StandardId::new(0x123).unwrap(), &[0x11]).unwrap();
+        tx.send(&frame).await.unwrap();
     });
 
     // Producer task 2
     tokio::spawn(async move {
-        let frame = Frame::standard(StandardId::new(0x456).unwrap(), &[0x22]);
-        tx2.send(frame).await.unwrap();
+        let frame = CanMessage::new(StandardId::new(0x456).unwrap(), &[0x22]).unwrap();
+        tx2.send(&frame).await.unwrap();
     });
 
     // Consumer

@@ -1,6 +1,6 @@
 //! zencan frontend: provides `BusManager`-compatible sender/receiver.
 //!
-//! Converts between this crate's `embedded-can` based [`CanMessage`] and
+//! Converts between `embedded-can` based [`CanMessage`] and
 //! `zencan-common`'s message types, and implements zencan's
 //! `AsyncCanSender` / `AsyncCanReceiver` traits.
 
@@ -11,9 +11,9 @@ use zencan_common::{CanId, CanMessage as ZenCanMessage};
 use crate::frontend::tokio_serial::{split, CanUsbSender, ClientError};
 use crate::message::CanMessage;
 use crate::protocol::Protocol;
-use embedded_can::{ExtendedId, Id, StandardId};
+use embedded_can::{ExtendedId, Frame, Id, StandardId};
 
-/// Convert a zencan message into this crate's `embedded-can` based message.
+/// Convert a zencan message into an `embedded-can` based message.
 ///
 /// Returns `None` if the ID or DLC is out of range.
 pub fn message_from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
@@ -22,19 +22,19 @@ pub fn message_from_zencan(msg: &ZenCanMessage) -> Option<CanMessage> {
         CanId::Extended(raw) => Id::Extended(ExtendedId::new(raw)?),
     };
     if msg.rtr {
-        CanMessage::new_rtr(id, msg.dlc)
+        CanMessage::new_remote(id, msg.dlc as usize)
     } else {
         CanMessage::new(id, msg.data())
     }
 }
 
-/// Convert this crate's message into a zencan message.
-pub fn message_to_zencan(msg: &CanMessage) -> ZenCanMessage {
+/// Convert an `embedded-can` frame into a zencan message.
+pub fn message_to_zencan(msg: &impl Frame) -> ZenCanMessage {
     let id = match msg.id() {
         Id::Standard(std) => CanId::Std(std.as_raw()),
         Id::Extended(ext) => CanId::Extended(ext.as_raw()),
     };
-    if msg.is_rtr() {
+    if msg.is_remote_frame() {
         ZenCanMessage::new_rtr(id)
     } else {
         ZenCanMessage::new(id, msg.data())
@@ -99,10 +99,10 @@ impl AsyncCanSender for ZenCanSender {
 
     async fn send(&mut self, msg: ZenCanMessage) -> Result<(), Self::Error> {
         let converted = message_from_zencan(&msg).ok_or_else(|| {
-            ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg.clone()))
+            ZenCanSendError::new("Invalid CAN message".to_string(), Some(msg))
         })?;
 
-        self.inner.send(converted.into()).await.map_err(|e| {
+        self.inner.send(&converted).await.map_err(|e| {
             // Send failed: return the error together with the original message
             ZenCanSendError::new(e.to_string(), Some(msg))
         })

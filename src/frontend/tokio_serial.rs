@@ -7,12 +7,12 @@
 //! [`tokio_serial::SerialStream`]; the backend is generic over the wire
 //! [`Protocol`].
 
-use crate::frame::Frame;
 #[allow(unused_imports)]
 use crate::logging::{error, info, trace, Fmt, Hex};
 use crate::message::CanMessage;
 use crate::protocol::{ParsedFrame, Protocol};
-use embedded_can::{ExtendedId, Id, StandardId};
+use crate::types::CanFrameType;
+use embedded_can::{ExtendedId, Frame, Id, StandardId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -34,8 +34,6 @@ pub enum ClientError {
     ReadTimeout,
     /// Message channel send error
     SendError(mpsc::error::SendError<CanMessage>),
-    /// Frame channel send error
-    FrameSendError(mpsc::error::SendError<Frame>),
     /// Channel closed
     ChannelClosed,
 }
@@ -49,7 +47,6 @@ impl core::fmt::Display for ClientError {
             ClientError::WriteTimeout => write!(f, "Write timeout"),
             ClientError::ReadTimeout => write!(f, "Read timeout"),
             ClientError::SendError(e) => write!(f, "Send error: {}", e),
-            ClientError::FrameSendError(e) => write!(f, "Frame send error: {}", e),
             ClientError::ChannelClosed => write!(f, "Channel closed"),
         }
     }
@@ -61,7 +58,6 @@ impl std::error::Error for ClientError {
             ClientError::Serial(e) => Some(e),
             ClientError::Io(e) => Some(e),
             ClientError::SendError(e) => Some(e),
-            ClientError::FrameSendError(e) => Some(e),
             _ => None,
         }
     }
@@ -85,12 +81,6 @@ impl From<mpsc::error::SendError<CanMessage>> for ClientError {
     }
 }
 
-impl From<mpsc::error::SendError<Frame>> for ClientError {
-    fn from(e: mpsc::error::SendError<Frame>) -> Self {
-        ClientError::FrameSendError(e)
-    }
-}
-
 /// Convert a parsed wire frame into a [`CanMessage`].
 fn parsed_to_message(parsed: &ParsedFrame) -> Option<CanMessage> {
     let can_id = if parsed.is_extended {
@@ -101,6 +91,15 @@ fn parsed_to_message(parsed: &ParsedFrame) -> Option<CanMessage> {
     CanMessage::new(can_id, &parsed.data)
 }
 
+/// Copy any [`embedded_can::Frame`] into an owned [`CanMessage`].
+fn to_message(frame: &impl Frame) -> Option<CanMessage> {
+    if frame.is_remote_frame() {
+        CanMessage::new_remote(frame.id(), frame.dlc())
+    } else {
+        CanMessage::new(frame.id(), frame.data())
+    }
+}
+
 // ============================================
 // Split mode: channel style
 // ============================================
@@ -108,18 +107,25 @@ fn parsed_to_message(parsed: &ParsedFrame) -> Option<CanMessage> {
 /// Sender half - frames are queued into a channel, a background task writes them to the serial port
 #[derive(Clone)]
 pub struct CanUsbSender {
-    frame_tx: mpsc::Sender<Frame>,
+    frame_tx: mpsc::Sender<CanMessage>,
 }
 
 impl CanUsbSender {
     /// Send a CAN frame asynchronously (non-blocking, buffered into the channel)
-    pub async fn send(&self, frame: Frame) -> Result<(), ClientError> {
-        self.frame_tx.send(frame).await.map_err(Into::into)
+    ///
+    /// Accepts any [`embedded_can::Frame`] implementation.
+    pub async fn send(&self, frame: &impl Frame) -> Result<(), ClientError> {
+        let msg = to_message(frame).ok_or(ClientError::Protocol("Invalid CAN frame"))?;
+        self.frame_tx.send(msg).await.map_err(Into::into)
     }
 
     /// Try to send without waiting (non-blocking)
-    pub fn try_send(&self, frame: Frame) -> Result<(), mpsc::error::TrySendError<Frame>> {
-        self.frame_tx.try_send(frame)
+    pub fn try_send(&self, frame: &impl Frame) -> Result<(), ClientError> {
+        let msg = to_message(frame).ok_or(ClientError::Protocol("Invalid CAN frame"))?;
+        self.frame_tx.try_send(msg).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => ClientError::Protocol("Send channel full"),
+            mpsc::error::TrySendError::Closed(_) => ClientError::ChannelClosed,
+        })
     }
 
     /// Check whether the channel is closed
@@ -153,7 +159,7 @@ where
     let serial = Arc::new(Mutex::new(serial));
 
     // Channel carrying frames to send (user -> background write task)
-    let (frame_tx, frame_rx) = mpsc::channel::<Frame>(100);
+    let (frame_tx, frame_rx) = mpsc::channel::<CanMessage>(100);
     // Channel carrying received messages (background read task -> user)
     let (msg_tx, msg_rx) = mpsc::channel::<CanMessage>(100);
 
@@ -191,7 +197,7 @@ where
 async fn split_background_task<P>(
     serial: Arc<Mutex<tokio_serial::SerialStream>>,
     protocol: P,
-    mut frame_rx: mpsc::Receiver<Frame>,
+    mut frame_rx: mpsc::Receiver<CanMessage>,
     msg_tx: mpsc::Sender<CanMessage>,
     debug_traffic: bool,
 ) where
@@ -280,13 +286,13 @@ async fn split_background_task<P>(
 
     // Write task
     let write_task = tokio::spawn(async move {
-        while let Some(frame) = frame_rx.recv().await {
+        while let Some(msg) = frame_rx.recv().await {
             // Build the wire data frame
             let mut buf = [0u8; 64];
             let len = match protocol_write.build_data_frame(
-                frame.frame_type,
-                frame.raw_id(),
-                frame.data(),
+                CanFrameType::from(msg.id()),
+                CanMessage::raw_id(msg.id()),
+                msg.data(),
                 &mut buf,
             ) {
                 Ok(n) => n,
@@ -384,11 +390,19 @@ impl<P: Protocol> CanUsbClient<P> {
         Ok(())
     }
 
-    pub async fn write(&mut self, frame: &Frame) -> Result<(), ClientError> {
+    /// Write a CAN frame to the adapter.
+    ///
+    /// Accepts any [`embedded_can::Frame`] implementation.
+    pub async fn write(&mut self, frame: &impl Frame) -> Result<(), ClientError> {
         let mut buf = [0u8; 64];
         let len = self
             .protocol
-            .build_data_frame(frame.frame_type, frame.raw_id(), frame.data(), &mut buf)
+            .build_data_frame(
+                CanFrameType::from(frame.id()),
+                CanMessage::raw_id(frame.id()),
+                frame.data(),
+                &mut buf,
+            )
             .map_err(ClientError::Protocol)?;
 
         if self.debug_traffic {

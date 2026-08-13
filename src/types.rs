@@ -17,14 +17,11 @@ pub enum CanFrameType {
     Extended = 0x02,
 }
 
-/// Payload injection mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PayloadMode {
-    /// Random payload
-    Random,
-    /// Incremental payload
-    Incremental,
-    /// Fixed payload (default)
-    #[default]
-    Fixed,
+impl From<embedded_can::Id> for CanFrameType {
+    fn from(id: embedded_can::Id) -> Self {
+        match id {
+            embedded_can::Id::Standard(_) => CanFrameType::Standard,
+            embedded_can::Id::Extended(_) => CanFrameType::Extended,
+        }
+    }
 }

@@ -21,18 +21,16 @@ extern crate alloc;
 
 mod logging;
 
-pub mod frame;
 pub mod message;
 pub mod protocol;
 pub mod types;
 
 pub mod frontend;
 
-// Re-export CAN types from embedded-can
-pub use embedded_can::{ExtendedId, Id, StandardId};
+// Re-export embedded-can CAN types (Frame trait + ID types)
+pub use embedded_can::{ExtendedId, Frame, Id, StandardId};
 
 // Re-export our modules
-pub use frame::Frame;
 pub use message::CanMessage;
 pub use protocol::{ParsedFrame, ParsedFrameMeta, Protocol};
-pub use types::{CanFrameType, PayloadMode};
+pub use types::CanFrameType;

@@ -2,9 +2,10 @@
 
 A Rust library for USB-CAN adapter communication.
 
-Core is `no_std` compatible. CAN message types are based on
-[`embedded-can`](https://docs.rs/embedded-can) (`Id`, `StandardId`, `ExtendedId`,
-`Frame` trait), with this crate's own `CanMessage` implementing it.
+Core is `no_std` compatible. CAN frame handling is based on
+[`embedded-can`](https://docs.rs/embedded-can): send APIs accept any
+`embedded_can::Frame` implementation, and received frames are returned as
+this crate's `CanMessage`, which implements the `Frame` trait.
 
 The wire protocol is abstracted behind the `protocol::Protocol` trait — the
 USB-CAN-A binary protocol (`protocol::usb_can::UsbCanA`) is just one

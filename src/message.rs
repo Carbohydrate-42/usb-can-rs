@@ -1,11 +1,13 @@
-//! CAN message type built on `embedded-can` traits.
+//! Concrete CAN frame type implementing [`embedded_can::Frame`].
+//!
+//! `embedded-can` only defines traits (`Frame`, `Id`, ...), so this crate
+//! provides exactly one owned frame type, used for received messages.
+//! Anything implementing [`embedded_can::Frame`] can be sent through the
+//! frontends.
 
-use embedded_can::{ExtendedId, Frame as CanFrame, Id, StandardId};
+use embedded_can::{ExtendedId, Frame, Id, StandardId};
 
 /// A CAN 2.0 message (classic CAN, up to 8 data bytes).
-///
-/// Implements [`embedded_can::Frame`], so it can be used with any
-/// `embedded-can` based ecosystem crate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanMessage {
     id: Id,
@@ -15,47 +17,27 @@ pub struct CanMessage {
 }
 
 impl CanMessage {
-    /// Create a new data message.
+    /// Extract the raw ID value (11-bit or 29-bit) as `u32`.
+    pub fn raw_id(id: Id) -> u32 {
+        match id {
+            Id::Standard(id) => id.as_raw() as u32,
+            Id::Extended(id) => id.as_raw(),
+        }
+    }
+
+    /// Build an [`Id`] from a raw value, choosing standard vs. extended by range.
     ///
-    /// Returns `None` if `data` is longer than 8 bytes.
-    pub fn new(id: impl Into<Id>, data: &[u8]) -> Option<Self> {
-        <Self as CanFrame>::new(id, data)
-    }
-
-    /// Create a new remote transmission request (RTR) message.
-    ///
-    /// Returns `None` if `dlc` is greater than 8.
-    pub fn new_rtr(id: impl Into<Id>, dlc: u8) -> Option<Self> {
-        <Self as CanFrame>::new_remote(id, dlc as usize)
-    }
-
-    /// The message ID.
-    pub fn id(&self) -> Id {
-        self.id
-    }
-
-    /// The message data (empty for RTR frames).
-    pub fn data(&self) -> &[u8] {
-        <Self as CanFrame>::data(self)
-    }
-
-    /// Data Length Code.
-    pub fn dlc(&self) -> u8 {
-        self.dlc
-    }
-
-    /// True if this is a remote transmission request.
-    pub fn is_rtr(&self) -> bool {
-        self.rtr
-    }
-
-    /// Raw 11/29-bit ID value as `u32`.
-    pub fn raw_id(&self) -> u32 {
-        raw_id(self.id)
+    /// Returns `None` if `raw` does not fit in 29 bits.
+    pub fn id_from_raw(raw: u32) -> Option<Id> {
+        if raw <= 0x7FF {
+            StandardId::new(raw as u16).map(Id::Standard)
+        } else {
+            ExtendedId::new(raw).map(Id::Extended)
+        }
     }
 }
 
-impl CanFrame for CanMessage {
+impl Frame for CanMessage {
     fn new(id: impl Into<Id>, data: &[u8]) -> Option<Self> {
         if data.len() > 8 {
             return None;
@@ -99,25 +81,10 @@ impl CanFrame for CanMessage {
     }
 
     fn data(&self) -> &[u8] {
-        if self.rtr { &[] } else { &self.data[..self.dlc as usize] }
-    }
-}
-
-/// Extract the raw ID value (11-bit or 29-bit) as `u32`.
-pub fn raw_id(id: Id) -> u32 {
-    match id {
-        Id::Standard(id) => id.as_raw() as u32,
-        Id::Extended(id) => id.as_raw(),
-    }
-}
-
-/// Build an [`Id`] from a raw value, choosing standard vs. extended by range.
-///
-/// Returns `None` if `raw` does not fit in 29 bits.
-pub fn id_from_raw(raw: u32) -> Option<Id> {
-    if raw <= 0x7FF {
-        StandardId::new(raw as u16).map(Id::Standard)
-    } else {
-        ExtendedId::new(raw).map(Id::Extended)
+        if self.rtr {
+            &[]
+        } else {
+            &self.data[..self.dlc as usize]
+        }
     }
 }

@@ -1,7 +1,7 @@
 //! Tests for the zencan frontend message conversions.
 
 use usb_can::frontend::zencan::{message_from_zencan, message_to_zencan};
-use usb_can::{ExtendedId, Id, StandardId};
+use usb_can::{ExtendedId, Frame, Id, StandardId};
 use zencan_common::{CanId, CanMessage as ZenCanMessage};
 
 #[test]
@@ -11,7 +11,7 @@ fn test_standard_message_roundtrip() {
 
     assert_eq!(ours.id(), Id::Standard(StandardId::new(0x123).unwrap()));
     assert_eq!(ours.data(), &[0x11, 0x22, 0x33]);
-    assert!(!ours.is_rtr());
+    assert!(!ours.is_remote_frame());
 
     let back = message_to_zencan(&ours);
     assert_eq!(back.id, CanId::Std(0x123));
@@ -37,7 +37,7 @@ fn test_rtr_message_roundtrip() {
     let zen = ZenCanMessage::new_rtr(CanId::Std(0x100));
     let ours = message_from_zencan(&zen).unwrap();
 
-    assert!(ours.is_rtr());
+    assert!(ours.is_remote_frame());
     assert_eq!(ours.data(), &[]);
 
     let back = message_to_zencan(&ours);

@@ -80,6 +80,789 @@ impl Command {
     }
 }
 
+pub struct CommandBuilder {}
+impl CommandBuilder {
+    /**********************************************************
+     *** 触发动作命令
+     **********************************************************/
+
+    /// 触发编码器校准（原 `X_V2_Trig_Encoder_Cal`）
+    pub fn trig_encoder_cal(addr: u8) -> Command {
+        Command::new([addr, 0x06, 0x45, CHECK])
+    }
+
+    /// 重启电机（X42S/Y42）（原 `X_V2_Reset_Motor`）
+    pub fn reset_motor(addr: u8) -> Command {
+        Command::new([addr, 0x08, 0x97, CHECK])
+    }
+
+    /// 将当前位置清零（原 `X_V2_Reset_CurPos_To_Zero`）
+    pub fn reset_cur_pos_to_zero(addr: u8) -> Command {
+        Command::new([addr, 0x0A, 0x6D, CHECK])
+    }
+
+    /// 解除堵转保护（原 `X_V2_Reset_Clog_Pro`）
+    pub fn reset_clog_pro(addr: u8) -> Command {
+        Command::new([addr, 0x0E, 0x52, CHECK])
+    }
+
+    /// 恢复出厂设置（原 `X_V2_Restore_Motor`）
+    pub fn restore_motor(addr: u8) -> Command {
+        Command::new([addr, 0x0F, 0x5F, CHECK])
+    }
+
+    /**********************************************************
+     *** 运动控制命令
+     **********************************************************/
+
+    /// 使能信号控制（原 `X_V2_En_Control`）
+    ///
+    /// * `state` ：使能状态，true为使能电机，false为关闭电机
+    /// * `sn_f`  ：多机同步标志，false为不启用，true为启用
+    pub fn en_control(addr: u8, state: bool, sn_f: bool) -> Command {
+        Command::new([addr, 0xF3, 0xAB, state as u8, sn_f as u8, CHECK])
+    }
+
+    /// 力矩模式（原 `X_V2_Torque_Control`）
+    ///
+    /// * `sign`   ：符号（方向），0为正，1为负
+    /// * `t_ramp` ：电流斜率(Ma/s)，范围0 - 65535Ma/s
+    /// * `torque` ：力矩电流(Ma)，范围0 - 6000Ma
+    /// * `sn_f`   ：多机同步标志，false为不启用，true为启用
+    pub fn torque_control(addr: u8, sign: u8, t_ramp: u16, torque: u16, sn_f: bool) -> Command {
+        let mut cmd = [0u8; 9];
+        cmd[0] = addr;
+        cmd[1] = 0xF5;
+        cmd[2] = sign;
+        cmd[3..5].copy_from_slice(&t_ramp.to_be_bytes());
+        cmd[5..7].copy_from_slice(&torque.to_be_bytes());
+        cmd[7] = sn_f as u8;
+        cmd[8] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 力矩模式限速控制（X42S/Y42）（原 `X_V2_Torque_LV_Control`）
+    ///
+    /// * `sign`    ：符号（方向），0为正，1为负
+    /// * `t_ramp`  ：电流斜率(Ma/s)，范围0 - 65535Ma/s
+    /// * `torque`  ：力矩电流(Ma)，范围0 - 6000Ma
+    /// * `sn_f`    ：多机同步标志，false为不启用，true为启用
+    /// * `max_vel` ：最大速度(RPM)，范围0.0 - 3000.0RPM
+    pub fn torque_lv_control(
+        addr: u8,
+        sign: u8,
+        t_ramp: u16,
+        torque: u16,
+        sn_f: bool,
+        max_vel: f32,
+    ) -> Command {
+        // 将速度放大10倍发送过去
+        let v = (max_vel * 10.0).abs() as u16;
+
+        let mut cmd = [0u8; 11];
+        cmd[0] = addr;
+        cmd[1] = 0xC5;
+        cmd[2] = sign;
+        cmd[3..5].copy_from_slice(&t_ramp.to_be_bytes());
+        cmd[5..7].copy_from_slice(&torque.to_be_bytes());
+        cmd[7] = sn_f as u8;
+        cmd[8..10].copy_from_slice(&v.to_be_bytes());
+        cmd[10] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 速度模式（原 `X_V2_Vel_Control`）
+    ///
+    /// * `dir`   ：方向，0为CW，1为CCW
+    /// * `acc`   ：加速度(RPM/s)，范围0 - 65535RPM/s
+    /// * `vel`   ：速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `sn_f`  ：多机同步标志，false为不启用，true为启用
+    pub fn vel_control(addr: u8, dir: u8, acc: u16, vel: f32, sn_f: bool) -> Command {
+        // 将速度放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+
+        let mut cmd = [0u8; 9];
+        cmd[0] = addr;
+        cmd[1] = 0xF6;
+        cmd[2] = dir;
+        cmd[3..5].copy_from_slice(&acc.to_be_bytes());
+        cmd[5..7].copy_from_slice(&v.to_be_bytes());
+        cmd[7] = sn_f as u8;
+        cmd[8] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 速度模式限电流控制（X42S/Y42）（原 `X_V2_Vel_LC_Control`）
+    ///
+    /// * `dir`     ：方向，0为CW，1为CCW
+    /// * `acc`     ：加速度(RPM/s)，范围0 - 65535RPM/s
+    /// * `vel`     ：速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `sn_f`    ：多机同步标志，false为不启用，true为启用
+    /// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
+    pub fn vel_lc_control(
+        addr: u8,
+        dir: u8,
+        acc: u16,
+        vel: f32,
+        sn_f: bool,
+        max_cur: u16,
+    ) -> Command {
+        // 将速度放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+
+        let mut cmd = [0u8; 11];
+        cmd[0] = addr;
+        cmd[1] = 0xC6;
+        cmd[2] = dir;
+        cmd[3..5].copy_from_slice(&acc.to_be_bytes());
+        cmd[5..7].copy_from_slice(&v.to_be_bytes());
+        cmd[7] = sn_f as u8;
+        cmd[8..10].copy_from_slice(&max_cur.to_be_bytes());
+        cmd[10] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 直通限速位置模式（原 `X_V2_Bypass_Pos_LV_Control`）
+    ///
+    /// * `dir`   ：方向，0为CW，1为CCW
+    /// * `vel`   ：运动速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `pos`   ：位置角度(°)，范围0.0°- (2^32 - 1) / 10°
+    /// * `raf`   ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
+    /// * `sn_f`  ：多机同步标志，false为不启用，true为启用
+    pub fn bypass_pos_lv_control(
+        addr: u8,
+        dir: u8,
+        vel: f32,
+        pos: f32,
+        raf: u8,
+        sn_f: bool,
+    ) -> Command {
+        // 将速度和位置放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+        let p = (pos * 10.0).abs() as u32;
+
+        let mut cmd = [0u8; 12];
+        cmd[0] = addr;
+        cmd[1] = 0xFB;
+        cmd[2] = dir;
+        cmd[3..5].copy_from_slice(&v.to_be_bytes());
+        cmd[5..9].copy_from_slice(&p.to_be_bytes());
+        cmd[9] = raf;
+        cmd[10] = sn_f as u8;
+        cmd[11] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 直通限速位置模式限电流控制（原 `X_V2_Bypass_Pos_LV_LC_Control`）
+    ///
+    /// * `dir`     ：方向，0为CW，1为CCW
+    /// * `vel`     ：运动速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `pos`     ：位置角度(°)，范围0.0°- (2^32 - 1) / 10°
+    /// * `raf`     ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
+    /// * `sn_f`    ：多机同步标志，false为不启用，true为启用
+    /// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
+    #[allow(clippy::too_many_arguments)]
+    pub fn bypass_pos_lv_lc_control(
+        addr: u8,
+        dir: u8,
+        vel: f32,
+        pos: f32,
+        raf: u8,
+        sn_f: bool,
+        max_cur: u16,
+    ) -> Command {
+        // 将速度和位置放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+        let p = (pos * 10.0).abs() as u32;
+
+        let mut cmd = [0u8; 14];
+        cmd[0] = addr;
+        cmd[1] = 0xCB;
+        cmd[2] = dir;
+        cmd[3..5].copy_from_slice(&v.to_be_bytes());
+        cmd[5..9].copy_from_slice(&p.to_be_bytes());
+        cmd[9] = raf;
+        cmd[10] = sn_f as u8;
+        cmd[11..13].copy_from_slice(&max_cur.to_be_bytes());
+        cmd[13] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 梯形曲线加减速位置模式控制（原 `X_V2_Traj_Pos_Control`）
+    ///
+    /// * `dir`   ：方向，0为CW，其余值为CCW
+    /// * `acc`   ：加速加速度(RPM/s)
+    /// * `dec`   ：减速加速度(RPM/s)
+    /// * `vel`   ：最大速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `pos`   ：位置(°)，范围0.0°- (2^32 - 1)°
+    /// * `raf`   ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
+    /// * `sn_f`  ：多机同步标志，false为不启用，true为启用
+    #[allow(clippy::too_many_arguments)]
+    pub fn traj_pos_control(
+        addr: u8,
+        dir: u8,
+        acc: u16,
+        dec: u16,
+        vel: f32,
+        pos: f32,
+        raf: u8,
+        sn_f: bool,
+    ) -> Command {
+        // 将速度和位置放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+        let p = (pos * 10.0).abs() as u32;
+
+        let mut cmd = [0u8; 16];
+        cmd[0] = addr;
+        cmd[1] = 0xFD;
+        cmd[2] = dir;
+        cmd[3..5].copy_from_slice(&acc.to_be_bytes());
+        cmd[5..7].copy_from_slice(&dec.to_be_bytes());
+        cmd[7..9].copy_from_slice(&v.to_be_bytes());
+        cmd[9..13].copy_from_slice(&p.to_be_bytes());
+        cmd[13] = raf;
+        cmd[14] = sn_f as u8;
+        cmd[15] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 梯形曲线加减速位置模式限电流控制（X42S/Y42）（原 `X_V2_Traj_Pos_LC_Control`）
+    ///
+    /// * `dir`     ：方向，0为CW，其余值为CCW
+    /// * `acc`     ：加速加速度(RPM/s)
+    /// * `dec`     ：减速加速度(RPM/s)
+    /// * `vel`     ：最大速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `pos`     ：位置(°)，范围0.0°- (2^32 - 1)°
+    /// * `raf`     ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
+    /// * `sn_f`    ：多机同步标志，false为不启用，true为启用
+    /// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
+    #[allow(clippy::too_many_arguments)]
+    pub fn traj_pos_lc_control(
+        addr: u8,
+        dir: u8,
+        acc: u16,
+        dec: u16,
+        vel: f32,
+        pos: f32,
+        raf: u8,
+        sn_f: bool,
+        max_cur: u16,
+    ) -> Command {
+        // 将速度和位置放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+        let p = (pos * 10.0).abs() as u32;
+
+        let mut cmd = [0u8; 18];
+        cmd[0] = addr;
+        cmd[1] = 0xCD;
+        cmd[2] = dir;
+        cmd[3..5].copy_from_slice(&acc.to_be_bytes());
+        cmd[5..7].copy_from_slice(&dec.to_be_bytes());
+        cmd[7..9].copy_from_slice(&v.to_be_bytes());
+        cmd[9..13].copy_from_slice(&p.to_be_bytes());
+        cmd[13] = raf;
+        cmd[14] = sn_f as u8;
+        cmd[15..17].copy_from_slice(&max_cur.to_be_bytes());
+        cmd[17] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 设置快速梯形曲线位置模式的运动参数（X42S/Y42）（原 `X_V2_Set_QTrajPos_Params`）
+    ///
+    /// * `acc`     ：加速加速度(RPM/s)
+    /// * `dec`     ：减速加速度(RPM/s)
+    /// * `vel`     ：最大速度(RPM)，范围0.0 - 3000.0RPM
+    /// * `raf`     ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对电机当前实时位置
+    /// * `sn_f`    ：多机同步标志，false为不启用，true为启用
+    /// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
+    pub fn set_qtraj_pos_params(
+        addr: u8,
+        acc: u16,
+        dec: u16,
+        vel: f32,
+        raf: u8,
+        sn_f: bool,
+        max_cur: u16,
+    ) -> Command {
+        // 将速度放大10倍发送过去
+        let v = (vel * 10.0).abs() as u16;
+
+        let mut cmd = [0u8; 13];
+        cmd[0] = addr;
+        cmd[1] = 0xF1;
+        cmd[2..4].copy_from_slice(&acc.to_be_bytes());
+        cmd[4..6].copy_from_slice(&dec.to_be_bytes());
+        cmd[6..8].copy_from_slice(&v.to_be_bytes());
+        cmd[8] = raf;
+        cmd[9] = sn_f as u8;
+        cmd[10..12].copy_from_slice(&max_cur.to_be_bytes());
+        cmd[12] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 快速梯形曲线位置模式控制（X42S/Y42）（原 `X_V2_QTrajPos_LC_Control`）
+    ///
+    /// * `pos` ：位置角度(带符号)，单位：0.1°
+    pub fn qtraj_pos_lc_control(addr: u8, pos: f32) -> Command {
+        // 将位置放大10倍发送过去（保留一位小数）
+        let p = (pos * 10.0).abs() as u32;
+
+        let mut cmd = [0u8; 7];
+        cmd[0] = addr;
+        cmd[1] = 0xFC;
+        cmd[2..6].copy_from_slice(&p.to_be_bytes());
+        cmd[6] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 立即停止（原 `X_V2_Stop_Now`）
+    ///
+    /// * `sn_f` ：多机同步标志，false为不启用，true为启用
+    pub fn stop_now(addr: u8, sn_f: bool) -> Command {
+        Command::new([addr, 0xFE, 0x98, sn_f as u8, CHECK])
+    }
+
+    /// 多机同步运动（原 `X_V2_Synchronous_motion`）
+    pub fn synchronous_motion(addr: u8) -> Command {
+        Command::new([addr, 0xFF, 0x66, CHECK])
+    }
+
+    /**********************************************************
+     *** 原点回零命令
+     **********************************************************/
+
+    /// 设置单圈回零的零点位置（原 `X_V2_Origin_Set_O`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    pub fn origin_set_o(addr: u8, sv_f: bool) -> Command {
+        Command::new([addr, 0x93, 0x88, sv_f as u8, CHECK])
+    }
+
+    /// 触发回零（原 `X_V2_Origin_Trigger_Return`）
+    ///
+    /// * `o_mode` ：回零模式，0为单圈就近回零，1为单圈方向回零，2为多圈无限位碰撞回零，3为多圈有限位开关回零
+    /// * `sn_f`   ：多机同步标志，false为不启用，true为启用
+    pub fn origin_trigger_return(addr: u8, o_mode: u8, sn_f: bool) -> Command {
+        Command::new([addr, 0x9A, o_mode, sn_f as u8, CHECK])
+    }
+
+    /// 强制中断并退出回零（原 `X_V2_Origin_Interrupt`）
+    pub fn origin_interrupt(addr: u8) -> Command {
+        Command::new([addr, 0x9C, 0x48, CHECK])
+    }
+
+    /// 读取回零参数（原 `X_V2_Origin_Read_Params`）
+    pub fn origin_read_params(addr: u8) -> Command {
+        Command::new([addr, 0x22, CHECK])
+    }
+
+    /// 修改回零参数（原 `X_V2_Origin_Modify_Params`）
+    ///
+    /// * `sv_f`   ：是否存储标志，false为不存储，true为存储
+    /// * `o_mode` ：回零模式，0为单圈就近回零，1为单圈方向回零，2为多圈无限位碰撞回零，3为多圈有限位开关回零
+    /// * `o_dir`  ：回零方向，0为CW，其余值为CCW
+    /// * `o_vel`  ：回零速度，单位：RPM（转/分钟）
+    /// * `o_tm`   ：回零超时时间，单位：毫秒
+    /// * `sl_vel` ：无限位碰撞回零检测转速，单位：RPM（转/分钟）
+    /// * `sl_ma`  ：无限位碰撞回零检测电流，单位：Ma（毫安）
+    /// * `sl_ms`  ：无限位碰撞回零检测时间，单位：Ms（毫秒）
+    /// * `pot_f`  ：上电自动触发回零，false为不使能，true为使能
+    #[allow(clippy::too_many_arguments)]
+    pub fn origin_modify_params(
+        addr: u8,
+        sv_f: bool,
+        o_mode: u8,
+        o_dir: u8,
+        o_vel: u16,
+        o_tm: u32,
+        sl_vel: u16,
+        sl_ma: u16,
+        sl_ms: u16,
+        pot_f: bool,
+    ) -> Command {
+        let mut cmd = [0u8; 20];
+        cmd[0] = addr;
+        cmd[1] = 0x4C;
+        cmd[2] = 0xAE;
+        cmd[3] = sv_f as u8;
+        cmd[4] = o_mode;
+        cmd[5] = o_dir;
+        cmd[6..8].copy_from_slice(&o_vel.to_be_bytes());
+        cmd[8..12].copy_from_slice(&o_tm.to_be_bytes());
+        cmd[12..14].copy_from_slice(&sl_vel.to_be_bytes());
+        cmd[14..16].copy_from_slice(&sl_ma.to_be_bytes());
+        cmd[16..18].copy_from_slice(&sl_ms.to_be_bytes());
+        cmd[18] = pot_f as u8;
+        cmd[19] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取碰撞回零返回角度（X42S/Y42）（原 `X_V2_Origin_Read_SL_RP`）
+    pub fn origin_read_sl_rp(addr: u8) -> Command {
+        Command::new([addr, 0x3F, CHECK])
+    }
+
+    /// 修改碰撞回零返回角度（X42S/Y42）（原 `X_V2_Origin_Modify_SL_RP`）
+    ///
+    /// * `sv_f`  ：是否存储标志，false为不存储，true为存储
+    /// * `sl_rp` ：碰撞回零返回角度，单位0.1°，即给40，就是4.0°
+    pub fn origin_modify_sl_rp(addr: u8, sv_f: bool, sl_rp: u16) -> Command {
+        let mut cmd = [0u8; 7];
+        cmd[0] = addr;
+        cmd[1] = 0x5C;
+        cmd[2] = 0xAC;
+        cmd[3] = sv_f as u8;
+        cmd[4..6].copy_from_slice(&sl_rp.to_be_bytes());
+        cmd[6] = CHECK;
+        Command::new(cmd)
+    }
+
+    /**********************************************************
+     *** 读取系统参数命令
+     **********************************************************/
+
+    /// 定时返回信息命令（X42S/Y42）（原 `X_V2_Auto_Return_Sys_Params_Timed`）
+    ///
+    /// * `s`       ：系统参数类型
+    /// * `time_ms` ：定时时间
+    pub fn auto_return_sys_params_timed(addr: u8, s: SysParams, time_ms: u16) -> Command {
+        let mut buf = [0u8; MAX_CMD_LEN];
+        let mut len = 0;
+
+        buf[len] = addr;
+        len += 1;
+        buf[len] = 0x11;
+        len += 1;
+        buf[len] = 0x18;
+        len += 1;
+
+        // 信息功能码（该命令不支持 Sys，与 C 版本行为一致：不发信息码字节）
+        if let Some(code) = s.timed_code() {
+            buf[len] = code;
+            len += 1;
+        }
+
+        buf[len..len + 2].copy_from_slice(&time_ms.to_be_bytes());
+        len += 2;
+
+        buf[len] = CHECK;
+        len += 1;
+
+        Command::from_parts(buf, len)
+    }
+
+    /// 读取系统参数（原 `X_V2_Read_Sys_Params`）
+    ///
+    /// * `s` ：系统参数类型
+    pub fn read_sys_params(addr: u8, s: SysParams) -> Command {
+        let mut buf = [0u8; MAX_CMD_LEN];
+        let mut len = 0;
+
+        buf[len] = addr;
+        len += 1;
+
+        // 功能码（Sys 需要多补一个辅助码 0x7A）
+        let (code, aux) = s.code();
+        buf[len] = code;
+        len += 1;
+        if let Some(aux) = aux {
+            buf[len] = aux;
+            len += 1;
+        }
+
+        buf[len] = CHECK;
+        len += 1;
+
+        Command::from_parts(buf, len)
+    }
+
+    /**********************************************************
+     *** 读写驱动参数命令
+     **********************************************************/
+
+    /// 修改电机ID地址（原 `X_V2_Modify_Motor_ID`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    /// * `id`   ：默认电机ID为1，可修改为1-255，0为广播地址
+    pub fn modify_motor_id(addr: u8, sv_f: bool, id: u8) -> Command {
+        Command::new([addr, 0xAE, 0x4B, sv_f as u8, id, CHECK])
+    }
+
+    /// 修改细分值（原 `X_V2_Modify_MicroStep`）
+    ///
+    /// * `sv_f`  ：是否存储标志，false为不存储，true为存储
+    /// * `mstep` ：默认细分为16，可修改为1-2556，0为256细分
+    pub fn modify_micro_step(addr: u8, sv_f: bool, mstep: u8) -> Command {
+        Command::new([addr, 0x84, 0x8A, sv_f as u8, mstep, CHECK])
+    }
+
+    /// 修改掉电标志（原 `X_V2_Modify_PDFlag`）
+    ///
+    /// * `pdf` ：掉电标志
+    pub fn modify_pd_flag(addr: u8, pdf: bool) -> Command {
+        Command::new([addr, 0x50, pdf as u8, CHECK])
+    }
+
+    /// 读取选项参数状态（X42S/Y42）（原 `X_V2_Read_Opt_Param_Sta`）
+    pub fn read_opt_param_sta(addr: u8) -> Command {
+        Command::new([addr, 0x1A, CHECK])
+    }
+
+    /// 修改电机类型（X42S/Y42）（原 `X_V2_Modify_Motor_Type`）
+    ///
+    /// * `sv_f`    ：是否存储标志，false为不存储，true为存储
+    /// * `mottype` ：电机类型，默认为0，0表示1.8°步进电机，1表示0.9°步进电机
+    pub fn modify_motor_type(addr: u8, sv_f: bool, mottype: bool) -> Command {
+        // 电机类型，0表示0.9°步进电机，1表示1.8°步进电机
+        let mot_type = if mottype { 25 } else { 50 };
+        Command::new([addr, 0xD7, 0x35, sv_f as u8, mot_type, CHECK])
+    }
+
+    /// 修改固件类型（X42S/Y42）（原 `X_V2_Modify_Firmware_Type`）
+    ///
+    /// * `sv_f`   ：是否存储标志，false为不存储，true为存储
+    /// * `fwtype` ：固件类型，默认为0，0为X固件，1为Emm固件
+    pub fn modify_firmware_type(addr: u8, sv_f: bool, fwtype: bool) -> Command {
+        Command::new([addr, 0xD5, 0x69, sv_f as u8, fwtype as u8, CHECK])
+    }
+
+    /// 修改开环/闭环控制模式（X42S/Y42）（原 `X_V2_Modify_Ctrl_Mode`）
+    ///
+    /// * `sv_f`      ：是否存储标志，false为不存储，true为存储
+    /// * `ctrl_mode` ：控制模式，默认为1,0为开环模式，1为闭环FOC模式
+    pub fn modify_ctrl_mode(addr: u8, sv_f: bool, ctrl_mode: bool) -> Command {
+        Command::new([addr, 0x46, 0x69, sv_f as u8, ctrl_mode as u8, CHECK])
+    }
+
+    /// 修改电机运动正方向（X42S/Y42）（原 `X_V2_Modify_Motor_Dir`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    /// * `dir`  ：电机运动正方向，默认为CW，0为CW（顺时针方向），1为CCW
+    pub fn modify_motor_dir(addr: u8, sv_f: bool, dir: bool) -> Command {
+        Command::new([addr, 0xD4, 0x60, sv_f as u8, dir as u8, CHECK])
+    }
+
+    /// 修改锁定按键功能（X42S/Y42）（原 `X_V2_Modify_Lock_Btn`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    /// * `lock` ：锁定按键功能，默认为Disable，0为Disable，1为Enable
+    pub fn modify_lock_btn(addr: u8, sv_f: bool, lock: bool) -> Command {
+        Command::new([addr, 0xD0, 0xB3, sv_f as u8, lock as u8, CHECK])
+    }
+
+    /// 修改命令位置角度是否继续缩小10倍输入（X42S/Y42）（原 `X_V2_Modify_S_Vel`）
+    ///
+    /// * `sv_f`  ：是否存储标志，false为不存储，true为存储
+    /// * `s_vel` ：命令位置角度是否继续缩小10倍输入，默认为Disable，0为Disable，1为Enable
+    pub fn modify_s_vel(addr: u8, sv_f: bool, s_vel: bool) -> Command {
+        Command::new([addr, 0x4F, 0x71, sv_f as u8, s_vel as u8, CHECK])
+    }
+
+    /// 修改开环模式工作电流（原 `X_V2_Modify_OM_mA`）
+    ///
+    /// * `sv_f`  ：是否存储标志，false为不存储，true为存储
+    /// * `om_ma` ：开环模式工作电流，单位mA
+    pub fn modify_om_ma(addr: u8, sv_f: bool, om_ma: u16) -> Command {
+        let mut cmd = [0u8; 7];
+        cmd[0] = addr;
+        cmd[1] = 0x44;
+        cmd[2] = 0x33;
+        cmd[3] = sv_f as u8;
+        cmd[4..6].copy_from_slice(&om_ma.to_be_bytes());
+        cmd[6] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 修改闭环模式最大电流（原 `X_V2_Modify_FOC_mA`）
+    ///
+    /// * `sv_f`   ：是否存储标志，false为不存储，true为存储
+    /// * `foc_ma` ：闭环模式最大电流，单位mA
+    pub fn modify_foc_ma(addr: u8, sv_f: bool, foc_ma: u16) -> Command {
+        let mut cmd = [0u8; 7];
+        cmd[0] = addr;
+        cmd[1] = 0x45;
+        cmd[2] = 0x66;
+        cmd[3] = sv_f as u8;
+        cmd[4..6].copy_from_slice(&foc_ma.to_be_bytes());
+        cmd[6] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取PID参数（原 `X_V2_Read_PID_Params`）
+    pub fn read_pid_params(addr: u8) -> Command {
+        Command::new([addr, 0x21, CHECK])
+    }
+
+    /// 修改PID参数（原 `X_V2_Modify_PID_Params`）
+    ///
+    /// * `sv_f`  ：是否存储标志，false为不存储，true为存储
+    /// * `p_tkp` ：梯形曲线位置环比例系数，默认为126640
+    /// * `p_bkp` ：直通限速位置环比例系数，默认为126640
+    /// * `vkp`   ：速度环比例系数，42默认为15600
+    /// * `vki`   ：速度环积分系数，42默认为26
+    pub fn modify_pid_params(
+        addr: u8,
+        sv_f: bool,
+        p_tkp: u32,
+        p_bkp: u32,
+        vkp: u32,
+        vki: u32,
+    ) -> Command {
+        let mut cmd = [0u8; 21];
+        cmd[0] = addr;
+        cmd[1] = 0x4A;
+        cmd[2] = 0xC3;
+        cmd[3] = sv_f as u8;
+        cmd[4..8].copy_from_slice(&p_tkp.to_be_bytes());
+        cmd[8..12].copy_from_slice(&p_bkp.to_be_bytes());
+        cmd[12..16].copy_from_slice(&vkp.to_be_bytes());
+        cmd[16..20].copy_from_slice(&vki.to_be_bytes());
+        cmd[20] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取DMX512协议参数（X42S/Y42）（原 `X_V2_Read_DMX512_Params`）
+    pub fn read_dmx512_params(addr: u8) -> Command {
+        Command::new([addr, 0x49, 0x78, CHECK])
+    }
+
+    /// 修改DMX512协议参数（X42S/Y42）（原 `X_V2_Modify_DMX512_Params`）
+    ///
+    /// * `sv_f`     ：是否存储标志，false为不存储，true为存储
+    /// * `tch`      ：总通道数，默认为192，该值要与自身 DMX512 控制器的总通道数一样
+    /// * `nch`      ：每个电机占用的通道数，默认为1，1为单通道模式,2为双通道模式
+    /// * `mode`     ：运动模式，默认为1，0表示相对位置模式运动，1表示绝对坐标式位置运动
+    /// * `vel`      ：单通道模式的运动速度，默认值为1000， 单位RPM， 即1000RPM；
+    /// * `acc`      ：加速度，acc=加速数值/8=125，加速时间见说明书“5.3.12 位置模式控制（Emm）”
+    /// * `vel_step` ：双通道模式速度步长，默认值为 10， 即电机运动速度为(通道值 * 10)RPM
+    /// * `pos_step` ：双通道模式运动步长，默认值为 100， 即电机转动角度为(通道值 * 10.0)°
+    #[allow(clippy::too_many_arguments)]
+    pub fn modify_dmx512_params(
+        addr: u8,
+        sv_f: bool,
+        tch: u16,
+        nch: u8,
+        mode: u8,
+        vel: u16,
+        acc: u16,
+        vel_step: u16,
+        pos_step: u32,
+    ) -> Command {
+        let mut cmd = [0u8; 19];
+        cmd[0] = addr;
+        cmd[1] = 0xD9;
+        cmd[2] = 0x90;
+        cmd[3] = sv_f as u8;
+        cmd[4..6].copy_from_slice(&tch.to_be_bytes());
+        cmd[6] = nch;
+        cmd[7] = mode;
+        cmd[8..10].copy_from_slice(&vel.to_be_bytes());
+        cmd[10..12].copy_from_slice(&acc.to_be_bytes());
+        cmd[12..14].copy_from_slice(&vel_step.to_be_bytes());
+        cmd[14..18].copy_from_slice(&pos_step.to_be_bytes());
+        cmd[18] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取位置到达窗口（X42S/Y42）（原 `X_V2_Read_Pos_Window`）
+    pub fn read_pos_window(addr: u8) -> Command {
+        Command::new([addr, 0x41, CHECK])
+    }
+
+    /// 修改位置到达窗口（X42S/Y42）（原 `X_V2_Modify_Pos_Window`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    /// * `prw`  ：位置到达窗口，默认值为8，即0.8°
+    pub fn modify_pos_window(addr: u8, sv_f: bool, prw: u16) -> Command {
+        let mut cmd = [0u8; 7];
+        cmd[0] = addr;
+        cmd[1] = 0xD1;
+        cmd[2] = 0x07;
+        cmd[3] = sv_f as u8;
+        cmd[4..6].copy_from_slice(&prw.to_be_bytes());
+        cmd[6] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取过热过流保护检测阈值（X42S/Y42）（原 `X_V2_Read_Otocp`）
+    pub fn read_otocp(addr: u8) -> Command {
+        Command::new([addr, 0x13, CHECK])
+    }
+
+    /// 修改过热过流保护检测阈值（X42S/Y42）（原 `X_V2_Modify_Otocp`）
+    ///
+    /// * `sv_f`    ：是否存储标志，false为不存储，true为存储
+    /// * `otp`     ：过热保护检测阈值，默认100℃
+    /// * `ocp`     ：过流保护检测阈值，默认6600mA
+    /// * `time_ms` ：过热过流检测时间，默认1000ms
+    pub fn modify_otocp(addr: u8, sv_f: bool, otp: u16, ocp: u16, time_ms: u16) -> Command {
+        let mut cmd = [0u8; 11];
+        cmd[0] = addr;
+        cmd[1] = 0xD3;
+        cmd[2] = 0x56;
+        cmd[3] = sv_f as u8;
+        cmd[4..6].copy_from_slice(&otp.to_be_bytes());
+        cmd[6..8].copy_from_slice(&ocp.to_be_bytes());
+        cmd[8..10].copy_from_slice(&time_ms.to_be_bytes());
+        cmd[10] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取心跳保护功能时间（X42S/Y42）（原 `X_V2_Read_Heart_Protect`）
+    pub fn read_heart_protect(addr: u8) -> Command {
+        Command::new([addr, 0x16, CHECK])
+    }
+
+    /// 修改心跳保护功能时间（X42S/Y42）（原 `X_V2_Modify_Heart_Protect`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    /// * `hp`   ：心跳保护时间，单位：ms
+    pub fn modify_heart_protect(addr: u8, sv_f: bool, hp: u32) -> Command {
+        let mut cmd = [0u8; 9];
+        cmd[0] = addr;
+        cmd[1] = 0x68;
+        cmd[2] = 0x38;
+        cmd[3] = sv_f as u8;
+        cmd[4..8].copy_from_slice(&hp.to_be_bytes());
+        cmd[8] = CHECK;
+        Command::new(cmd)
+    }
+
+    /// 读取积分限幅/刚性系数（X42S/Y42）（原 `X_V2_Read_Integral_Limit`）
+    pub fn read_integral_limit(addr: u8) -> Command {
+        Command::new([addr, 0x23, CHECK])
+    }
+
+    /// 修改积分限幅/刚性系数（X42S/Y42）（原 `X_V2_Modify_Integral_Limit`）
+    ///
+    /// * `sv_f` ：是否存储标志，false为不存储，true为存储
+    /// * `il`   ：刚性系数，X 固件默认为X42S/Y42/388、X57S/Y57/512
+    pub fn modify_integral_limit(addr: u8, sv_f: bool, il: u32) -> Command {
+        let mut cmd = [0u8; 9];
+        cmd[0] = addr;
+        cmd[1] = 0x4B;
+        cmd[2] = 0x57;
+        cmd[3] = sv_f as u8;
+        cmd[4..8].copy_from_slice(&il.to_be_bytes());
+        cmd[8] = CHECK;
+        Command::new(cmd)
+    }
+
+    /**********************************************************
+     *** 读取所有驱动参数命令
+     **********************************************************/
+
+    /// 读取系统状态参数（原 `X_V2_Read_System_State_Params`）
+    pub fn read_system_state_params(addr: u8) -> Command {
+        Command::new([addr, 0x43, 0x7A, CHECK])
+    }
+
+    /// 读取驱动配置参数（原 `X_V2_Read_Motor_Conf_Params`）
+    pub fn read_motor_conf_params(addr: u8) -> Command {
+        Command::new([addr, 0x42, 0x6C, CHECK])
+    }
+}
+
 /// 多电机打包帧（0xAA 功能码，一条帧携带多条子命令）
 #[derive(Debug, Clone)]
 pub struct Batch {
@@ -474,786 +1257,6 @@ impl AsyncCanRx for UnimplementedAsyncCan {
     }
 }
 
-/**********************************************************
-*** 触发动作命令
-**********************************************************/
-
-/// 触发编码器校准（原 `X_V2_Trig_Encoder_Cal`）
-pub fn trig_encoder_cal(addr: u8) -> Command {
-    Command::new([addr, 0x06, 0x45, CHECK])
-}
-
-/// 重启电机（X42S/Y42）（原 `X_V2_Reset_Motor`）
-pub fn reset_motor(addr: u8) -> Command {
-    Command::new([addr, 0x08, 0x97, CHECK])
-}
-
-/// 将当前位置清零（原 `X_V2_Reset_CurPos_To_Zero`）
-pub fn reset_cur_pos_to_zero(addr: u8) -> Command {
-    Command::new([addr, 0x0A, 0x6D, CHECK])
-}
-
-/// 解除堵转保护（原 `X_V2_Reset_Clog_Pro`）
-pub fn reset_clog_pro(addr: u8) -> Command {
-    Command::new([addr, 0x0E, 0x52, CHECK])
-}
-
-/// 恢复出厂设置（原 `X_V2_Restore_Motor`）
-pub fn restore_motor(addr: u8) -> Command {
-    Command::new([addr, 0x0F, 0x5F, CHECK])
-}
-
-/**********************************************************
-*** 运动控制命令
-**********************************************************/
-
-/// 使能信号控制（原 `X_V2_En_Control`）
-///
-/// * `state` ：使能状态，true为使能电机，false为关闭电机
-/// * `sn_f`  ：多机同步标志，false为不启用，true为启用
-pub fn en_control(addr: u8, state: bool, sn_f: bool) -> Command {
-    Command::new([addr, 0xF3, 0xAB, state as u8, sn_f as u8, CHECK])
-}
-
-/// 力矩模式（原 `X_V2_Torque_Control`）
-///
-/// * `sign`   ：符号（方向），0为正，1为负
-/// * `t_ramp` ：电流斜率(Ma/s)，范围0 - 65535Ma/s
-/// * `torque` ：力矩电流(Ma)，范围0 - 6000Ma
-/// * `sn_f`   ：多机同步标志，false为不启用，true为启用
-pub fn torque_control(addr: u8, sign: u8, t_ramp: u16, torque: u16, sn_f: bool) -> Command {
-    let mut cmd = [0u8; 9];
-    cmd[0] = addr;
-    cmd[1] = 0xF5;
-    cmd[2] = sign;
-    cmd[3..5].copy_from_slice(&t_ramp.to_be_bytes());
-    cmd[5..7].copy_from_slice(&torque.to_be_bytes());
-    cmd[7] = sn_f as u8;
-    cmd[8] = CHECK;
-    Command::new(cmd)
-}
-
-/// 力矩模式限速控制（X42S/Y42）（原 `X_V2_Torque_LV_Control`）
-///
-/// * `sign`    ：符号（方向），0为正，1为负
-/// * `t_ramp`  ：电流斜率(Ma/s)，范围0 - 65535Ma/s
-/// * `torque`  ：力矩电流(Ma)，范围0 - 6000Ma
-/// * `sn_f`    ：多机同步标志，false为不启用，true为启用
-/// * `max_vel` ：最大速度(RPM)，范围0.0 - 3000.0RPM
-pub fn torque_lv_control(
-    addr: u8,
-    sign: u8,
-    t_ramp: u16,
-    torque: u16,
-    sn_f: bool,
-    max_vel: f32,
-) -> Command {
-    // 将速度放大10倍发送过去
-    let v = (max_vel * 10.0).abs() as u16;
-
-    let mut cmd = [0u8; 11];
-    cmd[0] = addr;
-    cmd[1] = 0xC5;
-    cmd[2] = sign;
-    cmd[3..5].copy_from_slice(&t_ramp.to_be_bytes());
-    cmd[5..7].copy_from_slice(&torque.to_be_bytes());
-    cmd[7] = sn_f as u8;
-    cmd[8..10].copy_from_slice(&v.to_be_bytes());
-    cmd[10] = CHECK;
-    Command::new(cmd)
-}
-
-/// 速度模式（原 `X_V2_Vel_Control`）
-///
-/// * `dir`   ：方向，0为CW，1为CCW
-/// * `acc`   ：加速度(RPM/s)，范围0 - 65535RPM/s
-/// * `vel`   ：速度(RPM)，范围0.0 - 3000.0RPM
-/// * `sn_f`  ：多机同步标志，false为不启用，true为启用
-pub fn vel_control(addr: u8, dir: u8, acc: u16, vel: f32, sn_f: bool) -> Command {
-    // 将速度放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-
-    let mut cmd = [0u8; 9];
-    cmd[0] = addr;
-    cmd[1] = 0xF6;
-    cmd[2] = dir;
-    cmd[3..5].copy_from_slice(&acc.to_be_bytes());
-    cmd[5..7].copy_from_slice(&v.to_be_bytes());
-    cmd[7] = sn_f as u8;
-    cmd[8] = CHECK;
-    Command::new(cmd)
-}
-
-/// 速度模式限电流控制（X42S/Y42）（原 `X_V2_Vel_LC_Control`）
-///
-/// * `dir`     ：方向，0为CW，1为CCW
-/// * `acc`     ：加速度(RPM/s)，范围0 - 65535RPM/s
-/// * `vel`     ：速度(RPM)，范围0.0 - 3000.0RPM
-/// * `sn_f`    ：多机同步标志，false为不启用，true为启用
-/// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
-pub fn vel_lc_control(
-    addr: u8,
-    dir: u8,
-    acc: u16,
-    vel: f32,
-    sn_f: bool,
-    max_cur: u16,
-) -> Command {
-    // 将速度放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-
-    let mut cmd = [0u8; 11];
-    cmd[0] = addr;
-    cmd[1] = 0xC6;
-    cmd[2] = dir;
-    cmd[3..5].copy_from_slice(&acc.to_be_bytes());
-    cmd[5..7].copy_from_slice(&v.to_be_bytes());
-    cmd[7] = sn_f as u8;
-    cmd[8..10].copy_from_slice(&max_cur.to_be_bytes());
-    cmd[10] = CHECK;
-    Command::new(cmd)
-}
-
-/// 直通限速位置模式（原 `X_V2_Bypass_Pos_LV_Control`）
-///
-/// * `dir`   ：方向，0为CW，1为CCW
-/// * `vel`   ：运动速度(RPM)，范围0.0 - 3000.0RPM
-/// * `pos`   ：位置角度(°)，范围0.0°- (2^32 - 1) / 10°
-/// * `raf`   ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
-/// * `sn_f`  ：多机同步标志，false为不启用，true为启用
-pub fn bypass_pos_lv_control(
-    addr: u8,
-    dir: u8,
-    vel: f32,
-    pos: f32,
-    raf: u8,
-    sn_f: bool,
-) -> Command {
-    // 将速度和位置放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-    let p = (pos * 10.0).abs() as u32;
-
-    let mut cmd = [0u8; 12];
-    cmd[0] = addr;
-    cmd[1] = 0xFB;
-    cmd[2] = dir;
-    cmd[3..5].copy_from_slice(&v.to_be_bytes());
-    cmd[5..9].copy_from_slice(&p.to_be_bytes());
-    cmd[9] = raf;
-    cmd[10] = sn_f as u8;
-    cmd[11] = CHECK;
-    Command::new(cmd)
-}
-
-/// 直通限速位置模式限电流控制（原 `X_V2_Bypass_Pos_LV_LC_Control`）
-///
-/// * `dir`     ：方向，0为CW，1为CCW
-/// * `vel`     ：运动速度(RPM)，范围0.0 - 3000.0RPM
-/// * `pos`     ：位置角度(°)，范围0.0°- (2^32 - 1) / 10°
-/// * `raf`     ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
-/// * `sn_f`    ：多机同步标志，false为不启用，true为启用
-/// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
-#[allow(clippy::too_many_arguments)]
-pub fn bypass_pos_lv_lc_control(
-    addr: u8,
-    dir: u8,
-    vel: f32,
-    pos: f32,
-    raf: u8,
-    sn_f: bool,
-    max_cur: u16,
-) -> Command {
-    // 将速度和位置放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-    let p = (pos * 10.0).abs() as u32;
-
-    let mut cmd = [0u8; 14];
-    cmd[0] = addr;
-    cmd[1] = 0xCB;
-    cmd[2] = dir;
-    cmd[3..5].copy_from_slice(&v.to_be_bytes());
-    cmd[5..9].copy_from_slice(&p.to_be_bytes());
-    cmd[9] = raf;
-    cmd[10] = sn_f as u8;
-    cmd[11..13].copy_from_slice(&max_cur.to_be_bytes());
-    cmd[13] = CHECK;
-    Command::new(cmd)
-}
-
-/// 梯形曲线加减速位置模式控制（原 `X_V2_Traj_Pos_Control`）
-///
-/// * `dir`   ：方向，0为CW，其余值为CCW
-/// * `acc`   ：加速加速度(RPM/s)
-/// * `dec`   ：减速加速度(RPM/s)
-/// * `vel`   ：最大速度(RPM)，范围0.0 - 3000.0RPM
-/// * `pos`   ：位置(°)，范围0.0°- (2^32 - 1)°
-/// * `raf`   ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
-/// * `sn_f`  ：多机同步标志，false为不启用，true为启用
-#[allow(clippy::too_many_arguments)]
-pub fn traj_pos_control(
-    addr: u8,
-    dir: u8,
-    acc: u16,
-    dec: u16,
-    vel: f32,
-    pos: f32,
-    raf: u8,
-    sn_f: bool,
-) -> Command {
-    // 将速度和位置放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-    let p = (pos * 10.0).abs() as u32;
-
-    let mut cmd = [0u8; 16];
-    cmd[0] = addr;
-    cmd[1] = 0xFD;
-    cmd[2] = dir;
-    cmd[3..5].copy_from_slice(&acc.to_be_bytes());
-    cmd[5..7].copy_from_slice(&dec.to_be_bytes());
-    cmd[7..9].copy_from_slice(&v.to_be_bytes());
-    cmd[9..13].copy_from_slice(&p.to_be_bytes());
-    cmd[13] = raf;
-    cmd[14] = sn_f as u8;
-    cmd[15] = CHECK;
-    Command::new(cmd)
-}
-
-/// 梯形曲线加减速位置模式限电流控制（X42S/Y42）（原 `X_V2_Traj_Pos_LC_Control`）
-///
-/// * `dir`     ：方向，0为CW，其余值为CCW
-/// * `acc`     ：加速加速度(RPM/s)
-/// * `dec`     ：减速加速度(RPM/s)
-/// * `vel`     ：最大速度(RPM)，范围0.0 - 3000.0RPM
-/// * `pos`     ：位置(°)，范围0.0°- (2^32 - 1)°
-/// * `raf`     ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对当前实时位置
-/// * `sn_f`    ：多机同步标志，false为不启用，true为启用
-/// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
-#[allow(clippy::too_many_arguments)]
-pub fn traj_pos_lc_control(
-    addr: u8,
-    dir: u8,
-    acc: u16,
-    dec: u16,
-    vel: f32,
-    pos: f32,
-    raf: u8,
-    sn_f: bool,
-    max_cur: u16,
-) -> Command {
-    // 将速度和位置放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-    let p = (pos * 10.0).abs() as u32;
-
-    let mut cmd = [0u8; 18];
-    cmd[0] = addr;
-    cmd[1] = 0xCD;
-    cmd[2] = dir;
-    cmd[3..5].copy_from_slice(&acc.to_be_bytes());
-    cmd[5..7].copy_from_slice(&dec.to_be_bytes());
-    cmd[7..9].copy_from_slice(&v.to_be_bytes());
-    cmd[9..13].copy_from_slice(&p.to_be_bytes());
-    cmd[13] = raf;
-    cmd[14] = sn_f as u8;
-    cmd[15..17].copy_from_slice(&max_cur.to_be_bytes());
-    cmd[17] = CHECK;
-    Command::new(cmd)
-}
-
-/// 设置快速梯形曲线位置模式的运动参数（X42S/Y42）（原 `X_V2_Set_QTrajPos_Params`）
-///
-/// * `acc`     ：加速加速度(RPM/s)
-/// * `dec`     ：减速加速度(RPM/s)
-/// * `vel`     ：最大速度(RPM)，范围0.0 - 3000.0RPM
-/// * `raf`     ：相位/绝对运动标志，0为相对上一次输入目标位置，1为绝对位置，2为相对电机当前实时位置
-/// * `sn_f`    ：多机同步标志，false为不启用，true为启用
-/// * `max_cur` ：最大电流(mA)，范围0 - 6000mA
-pub fn set_qtraj_pos_params(
-    addr: u8,
-    acc: u16,
-    dec: u16,
-    vel: f32,
-    raf: u8,
-    sn_f: bool,
-    max_cur: u16,
-) -> Command {
-    // 将速度放大10倍发送过去
-    let v = (vel * 10.0).abs() as u16;
-
-    let mut cmd = [0u8; 13];
-    cmd[0] = addr;
-    cmd[1] = 0xF1;
-    cmd[2..4].copy_from_slice(&acc.to_be_bytes());
-    cmd[4..6].copy_from_slice(&dec.to_be_bytes());
-    cmd[6..8].copy_from_slice(&v.to_be_bytes());
-    cmd[8] = raf;
-    cmd[9] = sn_f as u8;
-    cmd[10..12].copy_from_slice(&max_cur.to_be_bytes());
-    cmd[12] = CHECK;
-    Command::new(cmd)
-}
-
-/// 快速梯形曲线位置模式控制（X42S/Y42）（原 `X_V2_QTrajPos_LC_Control`）
-///
-/// * `pos` ：位置角度(带符号)，单位：0.1°
-pub fn qtraj_pos_lc_control(addr: u8, pos: f32) -> Command {
-    // 将位置放大10倍发送过去（保留一位小数）
-    let p = (pos * 10.0).abs() as u32;
-
-    let mut cmd = [0u8; 7];
-    cmd[0] = addr;
-    cmd[1] = 0xFC;
-    cmd[2..6].copy_from_slice(&p.to_be_bytes());
-    cmd[6] = CHECK;
-    Command::new(cmd)
-}
-
-/// 立即停止（原 `X_V2_Stop_Now`）
-///
-/// * `sn_f` ：多机同步标志，false为不启用，true为启用
-pub fn stop_now(addr: u8, sn_f: bool) -> Command {
-    Command::new([addr, 0xFE, 0x98, sn_f as u8, CHECK])
-}
-
-/// 多机同步运动（原 `X_V2_Synchronous_motion`）
-pub fn synchronous_motion(addr: u8) -> Command {
-    Command::new([addr, 0xFF, 0x66, CHECK])
-}
-
-/**********************************************************
-*** 原点回零命令
-**********************************************************/
-
-/// 设置单圈回零的零点位置（原 `X_V2_Origin_Set_O`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-pub fn origin_set_o(addr: u8, sv_f: bool) -> Command {
-    Command::new([addr, 0x93, 0x88, sv_f as u8, CHECK])
-}
-
-/// 触发回零（原 `X_V2_Origin_Trigger_Return`）
-///
-/// * `o_mode` ：回零模式，0为单圈就近回零，1为单圈方向回零，2为多圈无限位碰撞回零，3为多圈有限位开关回零
-/// * `sn_f`   ：多机同步标志，false为不启用，true为启用
-pub fn origin_trigger_return(addr: u8, o_mode: u8, sn_f: bool) -> Command {
-    Command::new([addr, 0x9A, o_mode, sn_f as u8, CHECK])
-}
-
-/// 强制中断并退出回零（原 `X_V2_Origin_Interrupt`）
-pub fn origin_interrupt(addr: u8) -> Command {
-    Command::new([addr, 0x9C, 0x48, CHECK])
-}
-
-/// 读取回零参数（原 `X_V2_Origin_Read_Params`）
-pub fn origin_read_params(addr: u8) -> Command {
-    Command::new([addr, 0x22, CHECK])
-}
-
-/// 修改回零参数（原 `X_V2_Origin_Modify_Params`）
-///
-/// * `sv_f`   ：是否存储标志，false为不存储，true为存储
-/// * `o_mode` ：回零模式，0为单圈就近回零，1为单圈方向回零，2为多圈无限位碰撞回零，3为多圈有限位开关回零
-/// * `o_dir`  ：回零方向，0为CW，其余值为CCW
-/// * `o_vel`  ：回零速度，单位：RPM（转/分钟）
-/// * `o_tm`   ：回零超时时间，单位：毫秒
-/// * `sl_vel` ：无限位碰撞回零检测转速，单位：RPM（转/分钟）
-/// * `sl_ma`  ：无限位碰撞回零检测电流，单位：Ma（毫安）
-/// * `sl_ms`  ：无限位碰撞回零检测时间，单位：Ms（毫秒）
-/// * `pot_f`  ：上电自动触发回零，false为不使能，true为使能
-#[allow(clippy::too_many_arguments)]
-pub fn origin_modify_params(
-    addr: u8,
-    sv_f: bool,
-    o_mode: u8,
-    o_dir: u8,
-    o_vel: u16,
-    o_tm: u32,
-    sl_vel: u16,
-    sl_ma: u16,
-    sl_ms: u16,
-    pot_f: bool,
-) -> Command {
-    let mut cmd = [0u8; 20];
-    cmd[0] = addr;
-    cmd[1] = 0x4C;
-    cmd[2] = 0xAE;
-    cmd[3] = sv_f as u8;
-    cmd[4] = o_mode;
-    cmd[5] = o_dir;
-    cmd[6..8].copy_from_slice(&o_vel.to_be_bytes());
-    cmd[8..12].copy_from_slice(&o_tm.to_be_bytes());
-    cmd[12..14].copy_from_slice(&sl_vel.to_be_bytes());
-    cmd[14..16].copy_from_slice(&sl_ma.to_be_bytes());
-    cmd[16..18].copy_from_slice(&sl_ms.to_be_bytes());
-    cmd[18] = pot_f as u8;
-    cmd[19] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取碰撞回零返回角度（X42S/Y42）（原 `X_V2_Origin_Read_SL_RP`）
-pub fn origin_read_sl_rp(addr: u8) -> Command {
-    Command::new([addr, 0x3F, CHECK])
-}
-
-/// 修改碰撞回零返回角度（X42S/Y42）（原 `X_V2_Origin_Modify_SL_RP`）
-///
-/// * `sv_f`  ：是否存储标志，false为不存储，true为存储
-/// * `sl_rp` ：碰撞回零返回角度，单位0.1°，即给40，就是4.0°
-pub fn origin_modify_sl_rp(addr: u8, sv_f: bool, sl_rp: u16) -> Command {
-    let mut cmd = [0u8; 7];
-    cmd[0] = addr;
-    cmd[1] = 0x5C;
-    cmd[2] = 0xAC;
-    cmd[3] = sv_f as u8;
-    cmd[4..6].copy_from_slice(&sl_rp.to_be_bytes());
-    cmd[6] = CHECK;
-    Command::new(cmd)
-}
-
-/**********************************************************
-*** 读取系统参数命令
-**********************************************************/
-
-/// 定时返回信息命令（X42S/Y42）（原 `X_V2_Auto_Return_Sys_Params_Timed`）
-///
-/// * `s`       ：系统参数类型
-/// * `time_ms` ：定时时间
-pub fn auto_return_sys_params_timed(addr: u8, s: SysParams, time_ms: u16) -> Command {
-    let mut buf = [0u8; MAX_CMD_LEN];
-    let mut len = 0;
-
-    buf[len] = addr;
-    len += 1;
-    buf[len] = 0x11;
-    len += 1;
-    buf[len] = 0x18;
-    len += 1;
-
-    // 信息功能码（该命令不支持 Sys，与 C 版本行为一致：不发信息码字节）
-    if let Some(code) = s.timed_code() {
-        buf[len] = code;
-        len += 1;
-    }
-
-    buf[len..len + 2].copy_from_slice(&time_ms.to_be_bytes());
-    len += 2;
-
-    buf[len] = CHECK;
-    len += 1;
-
-    Command::from_parts(buf, len)
-}
-
-/// 读取系统参数（原 `X_V2_Read_Sys_Params`）
-///
-/// * `s` ：系统参数类型
-pub fn read_sys_params(addr: u8, s: SysParams) -> Command {
-    let mut buf = [0u8; MAX_CMD_LEN];
-    let mut len = 0;
-
-    buf[len] = addr;
-    len += 1;
-
-    // 功能码（Sys 需要多补一个辅助码 0x7A）
-    let (code, aux) = s.code();
-    buf[len] = code;
-    len += 1;
-    if let Some(aux) = aux {
-        buf[len] = aux;
-        len += 1;
-    }
-
-    buf[len] = CHECK;
-    len += 1;
-
-    Command::from_parts(buf, len)
-}
-
-/**********************************************************
-*** 读写驱动参数命令
-**********************************************************/
-
-/// 修改电机ID地址（原 `X_V2_Modify_Motor_ID`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-/// * `id`   ：默认电机ID为1，可修改为1-255，0为广播地址
-pub fn modify_motor_id(addr: u8, sv_f: bool, id: u8) -> Command {
-    Command::new([addr, 0xAE, 0x4B, sv_f as u8, id, CHECK])
-}
-
-/// 修改细分值（原 `X_V2_Modify_MicroStep`）
-///
-/// * `sv_f`  ：是否存储标志，false为不存储，true为存储
-/// * `mstep` ：默认细分为16，可修改为1-2556，0为256细分
-pub fn modify_micro_step(addr: u8, sv_f: bool, mstep: u8) -> Command {
-    Command::new([addr, 0x84, 0x8A, sv_f as u8, mstep, CHECK])
-}
-
-/// 修改掉电标志（原 `X_V2_Modify_PDFlag`）
-///
-/// * `pdf` ：掉电标志
-pub fn modify_pd_flag(addr: u8, pdf: bool) -> Command {
-    Command::new([addr, 0x50, pdf as u8, CHECK])
-}
-
-/// 读取选项参数状态（X42S/Y42）（原 `X_V2_Read_Opt_Param_Sta`）
-pub fn read_opt_param_sta(addr: u8) -> Command {
-    Command::new([addr, 0x1A, CHECK])
-}
-
-/// 修改电机类型（X42S/Y42）（原 `X_V2_Modify_Motor_Type`）
-///
-/// * `sv_f`    ：是否存储标志，false为不存储，true为存储
-/// * `mottype` ：电机类型，默认为0，0表示1.8°步进电机，1表示0.9°步进电机
-pub fn modify_motor_type(addr: u8, sv_f: bool, mottype: bool) -> Command {
-    // 电机类型，0表示0.9°步进电机，1表示1.8°步进电机
-    let mot_type = if mottype { 25 } else { 50 };
-    Command::new([addr, 0xD7, 0x35, sv_f as u8, mot_type, CHECK])
-}
-
-/// 修改固件类型（X42S/Y42）（原 `X_V2_Modify_Firmware_Type`）
-///
-/// * `sv_f`   ：是否存储标志，false为不存储，true为存储
-/// * `fwtype` ：固件类型，默认为0，0为X固件，1为Emm固件
-pub fn modify_firmware_type(addr: u8, sv_f: bool, fwtype: bool) -> Command {
-    Command::new([addr, 0xD5, 0x69, sv_f as u8, fwtype as u8, CHECK])
-}
-
-/// 修改开环/闭环控制模式（X42S/Y42）（原 `X_V2_Modify_Ctrl_Mode`）
-///
-/// * `sv_f`      ：是否存储标志，false为不存储，true为存储
-/// * `ctrl_mode` ：控制模式，默认为1,0为开环模式，1为闭环FOC模式
-pub fn modify_ctrl_mode(addr: u8, sv_f: bool, ctrl_mode: bool) -> Command {
-    Command::new([addr, 0x46, 0x69, sv_f as u8, ctrl_mode as u8, CHECK])
-}
-
-/// 修改电机运动正方向（X42S/Y42）（原 `X_V2_Modify_Motor_Dir`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-/// * `dir`  ：电机运动正方向，默认为CW，0为CW（顺时针方向），1为CCW
-pub fn modify_motor_dir(addr: u8, sv_f: bool, dir: bool) -> Command {
-    Command::new([addr, 0xD4, 0x60, sv_f as u8, dir as u8, CHECK])
-}
-
-/// 修改锁定按键功能（X42S/Y42）（原 `X_V2_Modify_Lock_Btn`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-/// * `lock` ：锁定按键功能，默认为Disable，0为Disable，1为Enable
-pub fn modify_lock_btn(addr: u8, sv_f: bool, lock: bool) -> Command {
-    Command::new([addr, 0xD0, 0xB3, sv_f as u8, lock as u8, CHECK])
-}
-
-/// 修改命令位置角度是否继续缩小10倍输入（X42S/Y42）（原 `X_V2_Modify_S_Vel`）
-///
-/// * `sv_f`  ：是否存储标志，false为不存储，true为存储
-/// * `s_vel` ：命令位置角度是否继续缩小10倍输入，默认为Disable，0为Disable，1为Enable
-pub fn modify_s_vel(addr: u8, sv_f: bool, s_vel: bool) -> Command {
-    Command::new([addr, 0x4F, 0x71, sv_f as u8, s_vel as u8, CHECK])
-}
-
-/// 修改开环模式工作电流（原 `X_V2_Modify_OM_mA`）
-///
-/// * `sv_f`  ：是否存储标志，false为不存储，true为存储
-/// * `om_ma` ：开环模式工作电流，单位mA
-pub fn modify_om_ma(addr: u8, sv_f: bool, om_ma: u16) -> Command {
-    let mut cmd = [0u8; 7];
-    cmd[0] = addr;
-    cmd[1] = 0x44;
-    cmd[2] = 0x33;
-    cmd[3] = sv_f as u8;
-    cmd[4..6].copy_from_slice(&om_ma.to_be_bytes());
-    cmd[6] = CHECK;
-    Command::new(cmd)
-}
-
-/// 修改闭环模式最大电流（原 `X_V2_Modify_FOC_mA`）
-///
-/// * `sv_f`   ：是否存储标志，false为不存储，true为存储
-/// * `foc_ma` ：闭环模式最大电流，单位mA
-pub fn modify_foc_ma(addr: u8, sv_f: bool, foc_ma: u16) -> Command {
-    let mut cmd = [0u8; 7];
-    cmd[0] = addr;
-    cmd[1] = 0x45;
-    cmd[2] = 0x66;
-    cmd[3] = sv_f as u8;
-    cmd[4..6].copy_from_slice(&foc_ma.to_be_bytes());
-    cmd[6] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取PID参数（原 `X_V2_Read_PID_Params`）
-pub fn read_pid_params(addr: u8) -> Command {
-    Command::new([addr, 0x21, CHECK])
-}
-
-/// 修改PID参数（原 `X_V2_Modify_PID_Params`）
-///
-/// * `sv_f`  ：是否存储标志，false为不存储，true为存储
-/// * `p_tkp` ：梯形曲线位置环比例系数，默认为126640
-/// * `p_bkp` ：直通限速位置环比例系数，默认为126640
-/// * `vkp`   ：速度环比例系数，42默认为15600
-/// * `vki`   ：速度环积分系数，42默认为26
-pub fn modify_pid_params(
-    addr: u8,
-    sv_f: bool,
-    p_tkp: u32,
-    p_bkp: u32,
-    vkp: u32,
-    vki: u32,
-) -> Command {
-    let mut cmd = [0u8; 21];
-    cmd[0] = addr;
-    cmd[1] = 0x4A;
-    cmd[2] = 0xC3;
-    cmd[3] = sv_f as u8;
-    cmd[4..8].copy_from_slice(&p_tkp.to_be_bytes());
-    cmd[8..12].copy_from_slice(&p_bkp.to_be_bytes());
-    cmd[12..16].copy_from_slice(&vkp.to_be_bytes());
-    cmd[16..20].copy_from_slice(&vki.to_be_bytes());
-    cmd[20] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取DMX512协议参数（X42S/Y42）（原 `X_V2_Read_DMX512_Params`）
-pub fn read_dmx512_params(addr: u8) -> Command {
-    Command::new([addr, 0x49, 0x78, CHECK])
-}
-
-/// 修改DMX512协议参数（X42S/Y42）（原 `X_V2_Modify_DMX512_Params`）
-///
-/// * `sv_f`     ：是否存储标志，false为不存储，true为存储
-/// * `tch`      ：总通道数，默认为192，该值要与自身 DMX512 控制器的总通道数一样
-/// * `nch`      ：每个电机占用的通道数，默认为1，1为单通道模式,2为双通道模式
-/// * `mode`     ：运动模式，默认为1，0表示相对位置模式运动，1表示绝对坐标式位置运动
-/// * `vel`      ：单通道模式的运动速度，默认值为1000， 单位RPM， 即1000RPM；
-/// * `acc`      ：加速度，acc=加速数值/8=125，加速时间见说明书“5.3.12 位置模式控制（Emm）”
-/// * `vel_step` ：双通道模式速度步长，默认值为 10， 即电机运动速度为(通道值 * 10)RPM
-/// * `pos_step` ：双通道模式运动步长，默认值为 100， 即电机转动角度为(通道值 * 10.0)°
-#[allow(clippy::too_many_arguments)]
-pub fn modify_dmx512_params(
-    addr: u8,
-    sv_f: bool,
-    tch: u16,
-    nch: u8,
-    mode: u8,
-    vel: u16,
-    acc: u16,
-    vel_step: u16,
-    pos_step: u32,
-) -> Command {
-    let mut cmd = [0u8; 19];
-    cmd[0] = addr;
-    cmd[1] = 0xD9;
-    cmd[2] = 0x90;
-    cmd[3] = sv_f as u8;
-    cmd[4..6].copy_from_slice(&tch.to_be_bytes());
-    cmd[6] = nch;
-    cmd[7] = mode;
-    cmd[8..10].copy_from_slice(&vel.to_be_bytes());
-    cmd[10..12].copy_from_slice(&acc.to_be_bytes());
-    cmd[12..14].copy_from_slice(&vel_step.to_be_bytes());
-    cmd[14..18].copy_from_slice(&pos_step.to_be_bytes());
-    cmd[18] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取位置到达窗口（X42S/Y42）（原 `X_V2_Read_Pos_Window`）
-pub fn read_pos_window(addr: u8) -> Command {
-    Command::new([addr, 0x41, CHECK])
-}
-
-/// 修改位置到达窗口（X42S/Y42）（原 `X_V2_Modify_Pos_Window`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-/// * `prw`  ：位置到达窗口，默认值为8，即0.8°
-pub fn modify_pos_window(addr: u8, sv_f: bool, prw: u16) -> Command {
-    let mut cmd = [0u8; 7];
-    cmd[0] = addr;
-    cmd[1] = 0xD1;
-    cmd[2] = 0x07;
-    cmd[3] = sv_f as u8;
-    cmd[4..6].copy_from_slice(&prw.to_be_bytes());
-    cmd[6] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取过热过流保护检测阈值（X42S/Y42）（原 `X_V2_Read_Otocp`）
-pub fn read_otocp(addr: u8) -> Command {
-    Command::new([addr, 0x13, CHECK])
-}
-
-/// 修改过热过流保护检测阈值（X42S/Y42）（原 `X_V2_Modify_Otocp`）
-///
-/// * `sv_f`    ：是否存储标志，false为不存储，true为存储
-/// * `otp`     ：过热保护检测阈值，默认100℃
-/// * `ocp`     ：过流保护检测阈值，默认6600mA
-/// * `time_ms` ：过热过流检测时间，默认1000ms
-pub fn modify_otocp(addr: u8, sv_f: bool, otp: u16, ocp: u16, time_ms: u16) -> Command {
-    let mut cmd = [0u8; 11];
-    cmd[0] = addr;
-    cmd[1] = 0xD3;
-    cmd[2] = 0x56;
-    cmd[3] = sv_f as u8;
-    cmd[4..6].copy_from_slice(&otp.to_be_bytes());
-    cmd[6..8].copy_from_slice(&ocp.to_be_bytes());
-    cmd[8..10].copy_from_slice(&time_ms.to_be_bytes());
-    cmd[10] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取心跳保护功能时间（X42S/Y42）（原 `X_V2_Read_Heart_Protect`）
-pub fn read_heart_protect(addr: u8) -> Command {
-    Command::new([addr, 0x16, CHECK])
-}
-
-/// 修改心跳保护功能时间（X42S/Y42）（原 `X_V2_Modify_Heart_Protect`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-/// * `hp`   ：心跳保护时间，单位：ms
-pub fn modify_heart_protect(addr: u8, sv_f: bool, hp: u32) -> Command {
-    let mut cmd = [0u8; 9];
-    cmd[0] = addr;
-    cmd[1] = 0x68;
-    cmd[2] = 0x38;
-    cmd[3] = sv_f as u8;
-    cmd[4..8].copy_from_slice(&hp.to_be_bytes());
-    cmd[8] = CHECK;
-    Command::new(cmd)
-}
-
-/// 读取积分限幅/刚性系数（X42S/Y42）（原 `X_V2_Read_Integral_Limit`）
-pub fn read_integral_limit(addr: u8) -> Command {
-    Command::new([addr, 0x23, CHECK])
-}
-
-/// 修改积分限幅/刚性系数（X42S/Y42）（原 `X_V2_Modify_Integral_Limit`）
-///
-/// * `sv_f` ：是否存储标志，false为不存储，true为存储
-/// * `il`   ：刚性系数，X 固件默认为X42S/Y42/388、X57S/Y57/512
-pub fn modify_integral_limit(addr: u8, sv_f: bool, il: u32) -> Command {
-    let mut cmd = [0u8; 9];
-    cmd[0] = addr;
-    cmd[1] = 0x4B;
-    cmd[2] = 0x57;
-    cmd[3] = sv_f as u8;
-    cmd[4..8].copy_from_slice(&il.to_be_bytes());
-    cmd[8] = CHECK;
-    Command::new(cmd)
-}
-
-/**********************************************************
-*** 读取所有驱动参数命令
-**********************************************************/
-
-/// 读取系统状态参数（原 `X_V2_Read_System_State_Params`）
-pub fn read_system_state_params(addr: u8) -> Command {
-    Command::new([addr, 0x43, 0x7A, CHECK])
-}
-
-/// 读取驱动配置参数（原 `X_V2_Read_Motor_Conf_Params`）
-pub fn read_motor_conf_params(addr: u8) -> Command {
-    Command::new([addr, 0x42, 0x6C, CHECK])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1347,10 +1350,7 @@ mod tests {
         // vel = 100.0 -> 1000 = 0x03E8；pos = 36.0 -> 360 = 0x00000168；max_cur = 2000 = 0x07D0
         assert_eq!(
             bypass_pos_lv_lc_control(0x01, 0, 100.0, 36.0, 0, false, 2000).as_bytes(),
-            &[
-                0x01, 0xCB, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x01, 0x68, 0x00, 0x00, 0x07, 0xD0,
-                0x6B
-            ]
+            &[0x01, 0xCB, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x01, 0x68, 0x00, 0x00, 0x07, 0xD0, 0x6B]
         );
     }
 
@@ -1371,11 +1371,17 @@ mod tests {
     fn send_cmd_splits_long_command() {
         let mut can = MockCan::default();
         // 数据 12 字节 > 7，拆两包发送
-        CanTx::send_cmd(&mut can, bypass_pos_lv_lc_control(0x01, 0, 100.0, 36.0, 0, false, 2000).as_bytes());
+        CanTx::send_cmd(
+            &mut can,
+            bypass_pos_lv_lc_control(0x01, 0, 100.0, 36.0, 0, false, 2000).as_bytes(),
+        );
         assert_eq!(can.n, 2);
         assert_eq!(
             can.frame(0),
-            (0x0100, &[0xCB, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x01, 0x68][..])
+            (
+                0x0100,
+                &[0xCB, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x01, 0x68][..]
+            )
         );
         assert_eq!(
             can.frame(1),
@@ -1430,8 +1436,8 @@ mod tests {
     }
 
     /**********************************************************
-    *** async 接口测试
-    **********************************************************/
+     *** async 接口测试
+     **********************************************************/
 
     /// 极简 block_on：本测试里的 future 都会立即就绪，空 waker 即可
     fn block_on<F: core::future::Future>(future: F) -> F::Output {
@@ -1483,7 +1489,10 @@ mod tests {
         assert_eq!(can.n, 2);
         assert_eq!(
             can.frame(0),
-            (0x0100, &[0xCB, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x01, 0x68][..])
+            (
+                0x0100,
+                &[0xCB, 0x00, 0x03, 0xE8, 0x00, 0x00, 0x01, 0x68][..]
+            )
         );
         assert_eq!(
             can.frame(1),
@@ -1507,9 +1516,118 @@ mod tests {
     }
 }
 
+/**********************************************************
+*** tokio-serial 上位机演示
+***
+*** 用 usb-can 库的 split 模式（后台收发任务 + channel）实现上面的
+*** [`AsyncCanTx`] / [`AsyncCanRx`]，于是 [`AsyncCanBus`] 的
+*** `write_read` 事务自动可用。演示流程：
+*** 使能电机 -> 速度模式运转 -> 查询实时转速 -> 停止并下电。
+***
+*** 需要 COM4 上接着 USB-CAN-A，总线上挂着地址为 1 的电机。
+**********************************************************/
 
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio_serial::SerialPortBuilderExt;
+use usb_can::adapters::tokio_serial::CanUsbSender;
+use usb_can::protocol::waveshare_usb_can_a::{self, CanSpeed, WaveshareUsbCanA};
+use usb_can::{CanMessage, ExtendedId, Frame, Id};
 
-fn main() {
-    // todo : try to use tokio_serial_can to send step-motor-ctrl command
-    todo!("TODO")
+/// 基于 tokio-serial split 模式的电机 CAN 总线
+struct MotorCan {
+    tx: CanUsbSender,
+    rx: mpsc::Receiver<CanMessage>,
+}
+
+impl AsyncCanTx for MotorCan {
+    async fn send_frame(&mut self, ext_id: u32, data: &[u8]) {
+        let id = ExtendedId::new(ext_id).expect("ext_id 超出 29 位范围");
+        let msg = CanMessage::new(Id::Extended(id), data).expect("data 长度不超过 8");
+        self.tx.send(&msg).await.expect("CAN 发送通道已关闭");
+    }
+}
+
+impl AsyncCanRx for MotorCan {
+    async fn receive_frame(&mut self) -> CanFrame {
+        let msg = self.rx.recv().await.expect("CAN 接收通道已关闭");
+        let mut data = [0u8; 8];
+        let len = msg.data().len();
+        data[..len].copy_from_slice(msg.data());
+        CanFrame {
+            ext_id: CanMessage::raw_id(msg.id()),
+            data,
+            len,
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    /// 电机地址（出厂默认为 1）
+    const MOTOR_ADDR: u8 = 1;
+
+    let serial = tokio_serial::new("COM4", 2_000_000)
+        .data_bits(tokio_serial::DataBits::Eight)
+        .stop_bits(tokio_serial::StopBits::Two)
+        .parity(tokio_serial::Parity::None)
+        .open_native_async()?;
+
+    // 电机协议走 29 位扩展帧；CAN 波特率需与电机配置一致
+    let config = waveshare_usb_can_a::Config {
+        can_speed: CanSpeed::Bps1000000,
+        can_mode: waveshare_usb_can_a::CanMode::Normal,
+        extended_ids: true,
+        ..Default::default()
+    };
+
+    let (tx, rx) = CanUsbSender::split(serial, WaveshareUsbCanA, &config).await?;
+    let mut can = MotorCan { tx, rx };
+
+    // 1. 使能电机
+    can.send_cmd(CommandBuilder::en_control(MOTOR_ADDR, true, false).as_bytes())
+        .await;
+    println!("电机已使能");
+
+    // 2. 速度模式：CW 方向，加速度 100 RPM/s，目标转速 60 RPM
+    can.send_cmd(CommandBuilder::vel_control(MOTOR_ADDR, 0, 100, 60.0, false).as_bytes())
+        .await;
+    println!("速度模式：60 RPM");
+
+    // 3. 查询实时转速（应答：[0x35, vel_hi, vel_lo]，单位 0.1 RPM，有符号）
+    let cmd = CommandBuilder::read_sys_params(MOTOR_ADDR, SysParams::Vel);
+    let query = can.write_read(cmd.as_bytes());
+    let resp = match tokio::time::timeout(Duration::from_secs(1), query).await {
+        Ok(Some(resp)) => resp,
+        Ok(None) => return Err("write_read 异常返回 None".into()),
+        Err(_) => {
+            return Err(format!(
+                "等待电机 {} 应答超时（1s）。可能原因：\n\
+                 - CAN 波特率与电机配置不一致（当前：1 Mbps）\n\
+                 - 总线接线问题（H/L 接反、未接 120Ω 终端电阻）\n\
+                 - 电机地址不是 {} 或电机未上电",
+                MOTOR_ADDR, MOTOR_ADDR
+            )
+            .into());
+        }
+    };
+    let vel = i16::from_be_bytes([resp.data[1], resp.data[2]]) as f32 / 10.0;
+    println!(
+        "实时转速: {:.1} RPM (raw: {:02X?})",
+        vel,
+        &resp.data[..resp.len]
+    );
+
+    // 转 2 秒
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // 4. 立即停止并关闭使能
+    can.send_cmd(CommandBuilder::stop_now(MOTOR_ADDR, false).as_bytes()).await;
+    can.send_cmd(CommandBuilder::en_control(MOTOR_ADDR, false, false).as_bytes())
+        .await;
+    println!("电机已停止");
+
+    Ok(())
 }

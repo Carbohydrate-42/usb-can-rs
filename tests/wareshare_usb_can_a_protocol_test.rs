@@ -30,7 +30,7 @@ fn parse_frames(buffer: &[u8]) -> (usize, Vec<(ParsedFrameMeta, Vec<u8>)>) {
 
 #[test]
 fn test_build_settings_frame() {
-    let frame = WaveshareUsbCanA::build_settings_frame(0x01, 0x00, false, 0x123, 0x7FF);
+    let frame = WaveshareUsbCanA::build_settings_frame(0x01, 0x00, false, 0x123, 0x7FF, true);
 
     assert_eq!(frame[0], 0xAA); // Start
     assert_eq!(frame[1], 0x55); // Command marker
@@ -49,6 +49,9 @@ fn test_build_settings_frame() {
     assert_eq!(frame[10], 0x07);
     assert_eq!(frame[11], 0x00);
     assert_eq!(frame[12], 0x00);
+
+    // Byte 14: 0x00 = auto-retransmit enabled
+    assert_eq!(frame[14], 0x00);
 }
 
 #[test]
@@ -70,9 +73,16 @@ fn test_build_data_frame_extended() {
     let data =
         build_data_frame(Id::Extended(ExtendedId::new(0x12345).unwrap()), &[0xAA]).unwrap();
 
+    assert_eq!(data.len(), 8); // header(2) + id(4) + data(1) + footer(1)
     assert_eq!(data[0], 0xAA); // Start
     assert_eq!(data[1], 0xE1); // 0xC0 | 0x20 (extended) | DLC=1
-    assert_eq!(data[4], 0xAA); // Data
+    // ID 0x12345, 4 bytes little endian
+    assert_eq!(data[2], 0x45);
+    assert_eq!(data[3], 0x23);
+    assert_eq!(data[4], 0x01);
+    assert_eq!(data[5], 0x00);
+    assert_eq!(data[6], 0xAA); // Data
+    assert_eq!(data[7], 0x55); // Footer
 }
 
 #[test]
@@ -113,13 +123,16 @@ fn test_parse_multiple_frames() {
 
 #[test]
 fn test_parse_extended_frame() {
-    // Extended frame marker
-    let buffer = [0xAA, 0xE2, 0x23, 0x01, 0x11, 0x22, 0x55];
+    // Extended frame: ID=0x1234567, DLC=2, Data=[0x11, 0x22]
+    let buffer = [0xAA, 0xE2, 0x67, 0x45, 0x23, 0x01, 0x11, 0x22, 0x55];
 
-    let (_, output) = parse_frames(&buffer);
+    let (consumed, output) = parse_frames(&buffer);
 
+    assert_eq!(consumed, 9);
     assert_eq!(output.len(), 1);
     assert!(output[0].0.is_extended);
+    assert_eq!(output[0].0.id, 0x1234567);
+    assert_eq!(output[0].1, vec![0x11, 0x22]);
 }
 
 #[test]

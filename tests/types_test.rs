@@ -26,7 +26,7 @@ fn test_can_speed_as_bps() {
 #[test]
 fn test_can_mode_values() {
     assert_eq!(CanMode::Normal as u8, 0x00);
-    assert_eq!(CanMode::Loopback as u8, 0x01);
-    assert_eq!(CanMode::Silent as u8, 0x02);
+    assert_eq!(CanMode::Silent as u8, 0x01);
+    assert_eq!(CanMode::Loopback as u8, 0x02);
     assert_eq!(CanMode::LoopbackSilent as u8, 0x03);
 }

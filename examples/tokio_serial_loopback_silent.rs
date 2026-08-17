@@ -1,6 +1,7 @@
-//! Loopback test: the adapter is put into `CanMode::Loopback`, so every frame
-//! it sends is received back by itself. TX and RX paths can be verified on a
-//! single device, without a CAN bus partner.
+//! Loopback test: the adapter is put into `CanMode::LoopbackSilent`, so every
+//! frame it sends is received back by itself without touching the CAN bus.
+//! TX and RX paths can be verified on a single device, without a CAN bus
+//! partner (pure loopback mode still expects a bus partner for ACK).
 //!
 //! Requires a real adapter on COM4.
 
@@ -21,10 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parity(tokio_serial::Parity::None)
         .open_native_async()?;
 
-    // Loopback mode: the adapter receives its own transmissions
+    // Loopback+silent mode: the adapter receives its own transmissions
+    // without driving the bus (no CAN partner / termination needed)
     let config = waveshare_usb_can_a::Config {
         can_speed: waveshare_usb_can_a::CanSpeed::Bps1000000,
-        can_mode: waveshare_usb_can_a::CanMode::Loopback,
+        can_mode: waveshare_usb_can_a::CanMode::LoopbackSilent,
         ..Default::default()
     };
 

@@ -15,8 +15,8 @@ pub const FRAME_FOOTER: u8 = 0x55;
 pub const CMD_FRAME_MARKER: u8 = 0x55;
 /// USB-CAN frame start byte
 pub const FRAME_START: u8 = 0xAA;
-/// Max wire size of a data frame: header(2) + id(2) + data(8) + footer(1)
-pub const DATA_FRAME_MAX_SIZE: usize = 13;
+/// Max wire size of a data frame: header(2) + id(4, extended) + data(8) + footer(1)
+pub const DATA_FRAME_MAX_SIZE: usize = 15;
 
 // ============================================
 // Protocol-specific configuration types
@@ -108,16 +108,27 @@ impl CanSpeed {
 }
 
 /// CAN bus operation mode
+///
+/// These map to the two mode switches of the STM32 bxCAN peripheral
+/// (loopback LBM, silent SILM). See the Waveshare USB-CAN-A protocol
+/// documentation for the wire values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum CanMode {
-    /// Normal mode
+    /// Normal mode: transmit and receive on the bus. Requires at least one
+    /// other working CAN node on the bus to ACK transmitted frames.
     Normal = 0x00,
-    /// Loopback mode
-    Loopback = 0x01,
-    /// Silent mode
-    Silent = 0x02,
-    /// Loopback + Silent mode
+    /// Silent mode: receive-only bus monitoring. Never drives the bus
+    /// (not even ACK bits), so it cannot disturb the network being observed.
+    Silent = 0x01,
+    /// Loopback mode: transmitted frames are fed back internally to the
+    /// receiver, but the TX pin still drives the bus and frames still need
+    /// a bus partner's ACK. NOT suitable for standalone self-tests without
+    /// a CAN bus; use [`CanMode::LoopbackSilent`] for that.
+    Loopback = 0x02,
+    /// Loopback + silent mode ("hot self-test"): internal self-reception
+    /// without touching the bus - no ACK, termination resistor, or bus
+    /// partner needed. Use this to verify TX/RX paths on a single adapter.
     LoopbackSilent = 0x03,
 }
 
@@ -134,6 +145,8 @@ pub struct Config {
     pub filter_id: u32,
     /// Mask ID (default: 0 - no masking)
     pub mask_id: u32,
+    /// Enable CAN automatic retransmission (default: true)
+    pub auto_retransmit: bool,
 }
 
 impl Default for Config {
@@ -144,6 +157,7 @@ impl Default for Config {
             extended_ids: false,
             filter_id: 0,
             mask_id: 0,
+            auto_retransmit: true,
         }
     }
 }
@@ -172,7 +186,7 @@ impl WaveshareUsbCanA {
     /// - Byte 5-8: filter_id (little endian)
     /// - Byte 9-12: mask_id (little endian)
     /// - Byte 13: mode
-    /// - Byte 14: 0x01
+    /// - Byte 14: 0x00 = auto-retransmit, 0x01 = disable auto-retransmit
     /// - Byte 15-18: reserved (0)
     /// - Byte 19: checksum
     pub fn build_settings_frame(
@@ -181,6 +195,7 @@ impl WaveshareUsbCanA {
         extended_ids: bool,
         filter_id: u32,
         mask_id: u32,
+        auto_retransmit: bool,
     ) -> [u8; CMD_FRAME_SIZE] {
         let mut frame = [0u8; CMD_FRAME_SIZE];
 
@@ -203,7 +218,7 @@ impl WaveshareUsbCanA {
         frame[12] = ((mask_id >> 24) & 0xFF) as u8;
 
         frame[13] = mode;
-        frame[14] = 0x01;
+        frame[14] = if auto_retransmit { 0x00 } else { 0x01 };
         // Byte 15-18 are already 0
 
         frame[19] = Self::generate_checksum(&frame, 2, 17);
@@ -216,9 +231,9 @@ impl WaveshareUsbCanA {
     /// Frame format:
     /// - Byte 0: 0xAA (start)
     /// - Byte 1: 0xC0 | (is_extended << 5) | dlc
-    /// - Byte 2-3: ID (little endian)
-    /// - Byte 4..4+dlc: Data
-    /// - Byte 4+dlc: 0x55 (footer)
+    /// - Byte 2..: ID (little endian, 2 bytes for standard, 4 bytes for extended)
+    /// - Then: Data
+    /// - Last: 0x55 (footer)
     ///
     /// Returns the number of bytes written to `out`.
     pub fn build_data_frame_into(
@@ -246,17 +261,18 @@ impl WaveshareUsbCanA {
         info |= data.len() as u8;
         out[1] = info;
 
-        // ID (little endian)
-        out[2] = (raw_id & 0xFF) as u8;
-        out[3] = ((raw_id >> 8) & 0xFF) as u8;
+        // ID (little endian): standard frames use 2 bytes, extended use 4
+        let id_len = if is_extended { 4 } else { 2 };
+        out[2..2 + id_len].copy_from_slice(&raw_id.to_le_bytes()[..id_len]);
 
         // Data
-        out[4..4 + data.len()].copy_from_slice(data);
+        let data_start = 2 + id_len;
+        out[data_start..data_start + data.len()].copy_from_slice(data);
 
         // Footer
-        out[4 + data.len()] = FRAME_FOOTER;
+        out[data_start + data.len()] = FRAME_FOOTER;
 
-        Ok(5 + data.len())
+        Ok(data_start + data.len() + 1)
     }
 
     /// Generate checksum for command frames
@@ -283,7 +299,7 @@ impl WaveshareUsbCanA {
     pub fn parse_next_frame(buffer: &[u8], data_out: &mut [u8; 8]) -> (usize, Option<ParsedFrameMeta>) {
         let mut offset = 0;
 
-        while buffer.len() - offset >= 6 {
+        while buffer.len() - offset >= 5 {
             // Look for frame start
             if buffer[offset] != FRAME_START {
                 offset += 1;
@@ -299,13 +315,16 @@ impl WaveshareUsbCanA {
                 continue;
             }
 
+            let is_extended = frame_type_nibble == 0x0E;
+            let id_len = if is_extended { 4 } else { 2 };
+
             let dlc = (info & 0x0F) as usize;
             if dlc > 8 {
                 // Not a valid classic-CAN frame; treat start byte as junk
                 offset += 1;
                 continue;
             }
-            let frame_len = dlc + 5; // header(2) + id(2) + data(dlc) + footer(1)
+            let frame_len = 2 + id_len + dlc + 1; // header(2) + id + data(dlc) + footer(1)
 
             // Check if we have the complete frame
             if buffer.len() - offset < frame_len {
@@ -319,14 +338,13 @@ impl WaveshareUsbCanA {
             }
 
             // Extract ID (little endian)
-            let id = u16::from_le_bytes([buffer[offset + 2], buffer[offset + 3]]);
+            let mut id_bytes = [0u8; 4];
+            id_bytes[..id_len].copy_from_slice(&buffer[offset + 2..offset + 2 + id_len]);
+            let id = u32::from_le_bytes(id_bytes);
 
             // Extract data
-            let data_start = offset + 4;
+            let data_start = offset + 2 + id_len;
             data_out[..dlc].copy_from_slice(&buffer[data_start..data_start + dlc]);
-
-            // Determine frame type
-            let is_extended = (info & 0x20) != 0;
 
             debug!(
                 "Parsed frame: id=0x{:03x}, extended={}, dlc={}, data={:?}",
@@ -370,6 +388,7 @@ impl Protocol for WaveshareUsbCanA {
             config.extended_ids,
             config.filter_id,
             config.mask_id,
+            config.auto_retransmit,
         );
         out[..CMD_FRAME_SIZE].copy_from_slice(&frame);
         Ok(CMD_FRAME_SIZE)

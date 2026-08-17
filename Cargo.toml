@@ -42,7 +42,7 @@ name = "tokio_serial_split"
 required-features = ["tokio-serial", "log"]
 
 [[example]]
-name = "tokio_serial_loopback"
+name = "tokio_serial_loopback_silent"
 required-features = ["tokio-serial", "log"]
 
 [[example]]

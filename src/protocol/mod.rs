@@ -9,7 +9,7 @@ use embedded_can::Frame;
 #[derive(Debug, Clone, Copy)]
 pub struct ParsedFrameMeta {
     /// Frame ID (11-bit or 29-bit)
-    pub id: u16,
+    pub id: u32,
     /// Data Length Code (0-8)
     pub dlc: u8,
     /// True if extended frame (29-bit ID)

@@ -209,9 +209,9 @@ impl<P: Protocol> Transport<P> {
     /// Convert a parsed wire frame into a [`CanMessage`].
     fn parsed_to_message(meta: &ParsedFrameMeta, data: &[u8; 8]) -> Option<CanMessage> {
         let can_id = if meta.is_extended {
-            Id::Extended(ExtendedId::new(meta.id as u32)?)
+            Id::Extended(ExtendedId::new(meta.id)?)
         } else {
-            Id::Standard(StandardId::new(meta.id)?)
+            Id::Standard(StandardId::new(meta.id as u16)?)
         };
         CanMessage::new(can_id, &data[..meta.dlc as usize])
     }

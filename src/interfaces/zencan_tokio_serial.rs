@@ -30,7 +30,7 @@ impl ZenCanSender {
     ///
     /// # Arguments
     /// * `serial` - serial port opened by the caller (e.g. via `open_native_async`)
-    /// * `protocol` - wire protocol implementation (e.g. [`crate::protocol::wareshare_usb_can_a::WaveshareUsbCanA`])
+    /// * `protocol` - wire protocol implementation (e.g. [`crate::protocol::waveshare_usb_can_a::WaveshareUsbCanA`])
     /// * `config` - protocol-specific configuration
     pub async fn split<P>(
         serial: tokio_serial::SerialStream,

@@ -1,4 +1,9 @@
 //! USB-CAN-A wire protocol implementation of [`Protocol`].
+//!
+//! Reference: Waveshare secondary-development serial-to-CAN protocol
+//! definition:
+//! - EN: <https://www.waveshare.com/wiki/Secondary_Development_Serial_Conversion_Definition_of_CAN_Protocol>
+//! - CN: <https://www.waveshare.net/wiki/二次开发—串行转换CAN协议的定义>
 
 #[allow(unused_imports)]
 use crate::logging::{debug, Hex};

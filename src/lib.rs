@@ -2,7 +2,7 @@
 //!
 //! The core is `no_std` compatible and allocation-free. The wire protocol is
 //! abstracted behind [`protocol::Protocol`]; the USB-CAN-A binary protocol
-//! ([`protocol::wareshare_usb_can_a::WaveshareUsbCanA`]) is one implementation of it.
+//! ([`protocol::waveshare_usb_can_a::WaveshareUsbCanA`]) is one implementation of it.
 //! I/O lives in [`adapters`] (device backends) and [`interfaces`] (foreign
 //! CAN ecosystem interfaces):
 //!

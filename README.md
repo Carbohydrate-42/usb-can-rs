@@ -8,14 +8,14 @@ on [`embedded-can`](https://docs.rs/embedded-can): send APIs accept any
 this crate's `CanMessage`, which implements the `Frame` trait.
 
 The wire protocol is abstracted behind the `protocol::Protocol` trait — the
-USB-CAN-A binary protocol (`protocol::wareshare_usb_can_a::WaveshareUsbCanA`)
+USB-CAN-A binary protocol (`protocol::waveshare_usb_can_a::WaveshareUsbCanA`)
 is one implementation of it.
 
 # Layout
 
 - `protocol` — wire protocol abstraction:
   - `protocol::Protocol`: the trait (settings frame, data frame build/parse)
-  - `protocol::wareshare_usb_can_a::WaveshareUsbCanA`: USB-CAN-A
+  - `protocol::waveshare_usb_can_a::WaveshareUsbCanA`: USB-CAN-A
     implementation + its config (`Config`, `CanSpeed`, `CanMode`)
 - `adapters` — device backends that move frames to/from the adapter:
   - `adapters::tokio_serial` (feature `tokio-serial`, std): async serial port
@@ -43,7 +43,7 @@ usb-can-a-rs = { git = "https://github.com/Carbohydrate-42/usb-can-rs", features
 ```
 
 ```rust
-use usb_can::protocol::wareshare_usb_can_a::{Config, WaveshareUsbCanA};
+use usb_can::protocol::waveshare_usb_can_a::{Config, WaveshareUsbCanA};
 
 // The serial port is opened by the caller; protocol is chosen explicitly
 let serial = tokio_serial::new("COM4", 2_000_000).open_native_async()?;

@@ -1,6 +1,6 @@
 //! Protocol tests
 
-use usb_can::protocol::wareshare_usb_can_a::{WaveshareUsbCanA, DATA_FRAME_MAX_SIZE};
+use usb_can::protocol::waveshare_usb_can_a::{WaveshareUsbCanA, DATA_FRAME_MAX_SIZE};
 use usb_can::protocol::ParsedFrameMeta;
 use usb_can::{ExtendedId, Id, StandardId};
 

@@ -1,4 +1,4 @@
-pub mod wareshare_usb_can_a;
+pub mod waveshare_usb_can_a;
 
 use embedded_can::Frame;
 

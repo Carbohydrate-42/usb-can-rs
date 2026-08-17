@@ -3,7 +3,7 @@
 
 use tokio_serial::SerialPortBuilderExt;
 use usb_can::interfaces::zencan_tokio_serial::ZenCanSender;
-use usb_can::protocol::wareshare_usb_can_a;
+use usb_can::protocol::waveshare_usb_can_a;
 use zencan_common::traits::{AsyncCanReceiver, AsyncCanSender};
 use zencan_common::{CanId, CanMessage};
 
@@ -18,14 +18,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parity(tokio_serial::Parity::None)
         .open_native_async()?;
 
-    let config = wareshare_usb_can_a::Config {
-        can_speed: wareshare_usb_can_a::CanSpeed::Bps1000000,
+    let config = waveshare_usb_can_a::Config {
+        can_speed: waveshare_usb_can_a::CanSpeed::Bps1000000,
         ..Default::default()
     };
 
     // (sender, receiver) compatible with zencan's BusManager::new
     let (mut tx, mut rx) =
-        ZenCanSender::split(serial, wareshare_usb_can_a::WaveshareUsbCanA, &config).await?;
+        ZenCanSender::split(serial, waveshare_usb_can_a::WaveshareUsbCanA, &config).await?;
 
     // Send via the zencan AsyncCanSender trait
     let msg = CanMessage::new(CanId::Std(0x123), &[0x11, 0x22]);

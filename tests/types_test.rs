@@ -1,6 +1,6 @@
 //! Type tests
 
-use usb_can::protocol::wareshare_usb_can_a::{CanMode, CanSpeed};
+use usb_can::protocol::waveshare_usb_can_a::{CanMode, CanSpeed};
 
 #[test]
 fn test_can_speed_try_from() {

@@ -7,7 +7,7 @@
 use std::time::Duration;
 use tokio_serial::SerialPortBuilderExt;
 use usb_can::adapters::tokio_serial::CanUsbClient;
-use usb_can::protocol::wareshare_usb_can_a;
+use usb_can::protocol::waveshare_usb_can_a;
 use usb_can::{CanMessage, Frame, StandardId};
 
 #[tokio::main]
@@ -22,14 +22,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .open_native_async()?;
 
     // Loopback mode: the adapter receives its own transmissions
-    let config = wareshare_usb_can_a::Config {
-        can_speed: wareshare_usb_can_a::CanSpeed::Bps1000000,
-        can_mode: wareshare_usb_can_a::CanMode::Loopback,
+    let config = waveshare_usb_can_a::Config {
+        can_speed: waveshare_usb_can_a::CanSpeed::Bps1000000,
+        can_mode: waveshare_usb_can_a::CanMode::Loopback,
         ..Default::default()
     };
 
     let mut client =
-        CanUsbClient::new(serial, wareshare_usb_can_a::WaveshareUsbCanA, config).await?;
+        CanUsbClient::new(serial, waveshare_usb_can_a::WaveshareUsbCanA, config).await?;
 
     let req = CanMessage::new(StandardId::new(0x123).unwrap(), &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
     client.write(&req).await?;

@@ -1517,27 +1517,33 @@ mod tests {
 }
 
 /**********************************************************
-*** tokio-serial 上位机演示
+*** tokio-serial 上位机演示（只发不收版）
 ***
 *** 用 usb-can 库的 split 模式（后台收发任务 + channel）实现上面的
-*** [`AsyncCanTx`] / [`AsyncCanRx`]，于是 [`AsyncCanBus`] 的
-*** `write_read` 事务自动可用。演示流程：
-*** 使能电机 -> 速度模式运转 -> 查询实时转速 -> 停止并下电。
+*** [`AsyncCanTx`]。本演示只发送命令，电机的应答帧由后台任务直接丢弃；
+*** 基于 [`AsyncCanRx`] / [`AsyncCanBus`] `write_read` 的查询应答演示后续再加。
+*** 演示流程：
+*** 1. 解除堵转保护并使能电机
+*** 2. 速度模式 CW 300 RPM 运转 3 秒，然后停止
+*** 3. 直通限速位置模式正反向各转一圈
+*** 4. 多电机事务（Transaction）打包发送：立即停止 + 位置清零
+*** 5. 停止并关闭使能
 ***
 *** 需要 COM4 上接着 USB-CAN-A，总线上挂着地址为 1 的电机。
 **********************************************************/
 
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio_serial::SerialPortBuilderExt;
 use usb_can::adapters::tokio_serial::CanUsbSender;
 use usb_can::protocol::waveshare_usb_can_a::{self, CanSpeed, WaveshareUsbCanA};
 use usb_can::{CanMessage, ExtendedId, Frame, Id};
 
-/// 基于 tokio-serial split 模式的电机 CAN 总线
+/// 电机地址（出厂默认为 1）
+const MOTOR_ADDR: u8 = 1;
+
+/// 基于 tokio-serial split 模式的电机 CAN 发送端
 struct MotorCan {
     tx: CanUsbSender,
-    rx: mpsc::Receiver<CanMessage>,
 }
 
 impl AsyncCanTx for MotorCan {
@@ -1548,26 +1554,53 @@ impl AsyncCanTx for MotorCan {
     }
 }
 
-impl AsyncCanRx for MotorCan {
-    async fn receive_frame(&mut self) -> CanFrame {
-        let msg = self.rx.recv().await.expect("CAN 接收通道已关闭");
-        let mut data = [0u8; 8];
-        let len = msg.data().len();
-        data[..len].copy_from_slice(msg.data());
-        CanFrame {
-            ext_id: CanMessage::raw_id(msg.id()),
-            data,
-            len,
-        }
+/// 功能展示主流程（只发不收，每步之间用固定延时等待动作完成）
+async fn run_demo(can: &mut MotorCan) {
+    // 1. 解除堵转保护（若之前触发过，否则运动命令会被拒绝），然后使能电机
+    println!("== 1. 使能电机 ==");
+    can.send_cmd(CommandBuilder::reset_clog_pro(MOTOR_ADDR).as_bytes())
+        .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    can.send_cmd(CommandBuilder::en_control(MOTOR_ADDR, true, false).as_bytes())
+        .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // 2. 速度模式：CW 方向，加速度 500 RPM/s，目标转速 300 RPM，运行 3 秒
+    println!("== 2. 速度模式：CW 300 RPM，运行 3 秒 ==");
+    can.send_cmd(CommandBuilder::vel_control(MOTOR_ADDR, 0, 500, 300.0, false).as_bytes())
+        .await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    can.send_cmd(CommandBuilder::stop_now(MOTOR_ADDR, false).as_bytes())
+        .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // 3. 直通限速位置模式：相对当前实时位置（raf = 2），正反向各转一圈
+    //    360° @ 150 RPM 约 2.4 秒，留足余量等 4 秒
+    println!("== 3. 位置模式：150 RPM 往返各转 360° ==");
+    for (dir, name) in [(0u8, "CW"), (1u8, "CCW")] {
+        println!("  {name}: 相对当前位置转 360°");
+        can.send_cmd(
+            CommandBuilder::bypass_pos_lv_control(MOTOR_ADDR, dir, 150.0, 360.0, 2, false)
+                .as_bytes(),
+        )
+        .await;
+        tokio::time::sleep(Duration::from_secs(4)).await;
     }
+
+    // 4. 多电机事务演示：把「立即停止 + 当前位置清零」打包成一帧 0xAA 命令发送
+    println!("== 4. 事务打包：立即停止 + 位置清零 ==");
+    let mut t = Transaction::begin();
+    t.load(CommandBuilder::stop_now(MOTOR_ADDR, false))
+        .load(CommandBuilder::reset_cur_pos_to_zero(MOTOR_ADDR));
+    if let Some(batch) = t.commit(0) {
+        can.send_cmd(batch.as_bytes()).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    /// 电机地址（出厂默认为 1）
-    const MOTOR_ADDR: u8 = 1;
 
     let serial = tokio_serial::new("COM4", 2_000_000)
         .data_bits(tokio_serial::DataBits::Eight)
@@ -1584,50 +1617,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (tx, rx) = CanUsbSender::split(serial, WaveshareUsbCanA, &config).await?;
-    let mut can = MotorCan { tx, rx };
+    let mut can = MotorCan { tx };
 
-    // 1. 使能电机
-    can.send_cmd(CommandBuilder::en_control(MOTOR_ADDR, true, false).as_bytes())
+    // 只发不收：电机的应答帧由后台任务收掉并丢弃，避免接收通道积压
+    tokio::spawn(async move {
+        let mut rx = rx;
+        while rx.recv().await.is_some() {}
+    });
+
+    // 跑功能展示
+    run_demo(&mut can).await;
+
+    // 5. 停止并关闭使能
+    can.send_cmd(CommandBuilder::stop_now(MOTOR_ADDR, false).as_bytes())
         .await;
-    println!("电机已使能");
-
-    // 2. 速度模式：CW 方向，加速度 100 RPM/s，目标转速 60 RPM
-    can.send_cmd(CommandBuilder::vel_control(MOTOR_ADDR, 0, 100, 60.0, false).as_bytes())
-        .await;
-    println!("速度模式：60 RPM");
-
-    // 3. 查询实时转速（应答：[0x35, vel_hi, vel_lo]，单位 0.1 RPM，有符号）
-    let cmd = CommandBuilder::read_sys_params(MOTOR_ADDR, SysParams::Vel);
-    let query = can.write_read(cmd.as_bytes());
-    let resp = match tokio::time::timeout(Duration::from_secs(1), query).await {
-        Ok(Some(resp)) => resp,
-        Ok(None) => return Err("write_read 异常返回 None".into()),
-        Err(_) => {
-            return Err(format!(
-                "等待电机 {} 应答超时（1s）。可能原因：\n\
-                 - CAN 波特率与电机配置不一致（当前：1 Mbps）\n\
-                 - 总线接线问题（H/L 接反、未接 120Ω 终端电阻）\n\
-                 - 电机地址不是 {} 或电机未上电",
-                MOTOR_ADDR, MOTOR_ADDR
-            )
-            .into());
-        }
-    };
-    let vel = i16::from_be_bytes([resp.data[1], resp.data[2]]) as f32 / 10.0;
-    println!(
-        "实时转速: {:.1} RPM (raw: {:02X?})",
-        vel,
-        &resp.data[..resp.len]
-    );
-
-    // 转 2 秒
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    // 4. 立即停止并关闭使能
-    can.send_cmd(CommandBuilder::stop_now(MOTOR_ADDR, false).as_bytes()).await;
     can.send_cmd(CommandBuilder::en_control(MOTOR_ADDR, false, false).as_bytes())
         .await;
-    println!("电机已停止");
+    println!("== 5. 电机已停止并下电 ==");
 
     Ok(())
 }
